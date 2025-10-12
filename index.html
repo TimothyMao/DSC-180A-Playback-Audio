@@ -25,7 +25,8 @@
         let currentTime = 0;
         let playbackRate = 1.0;
         
-        const grainSize = 0.05;
+        const grainSize = 0.1;
+        const overlap = 0.5;
 
         const playButton = document.getElementById("playButton");
         const speedSlider = document.getElementById("speedSlider");
@@ -53,13 +54,24 @@
 
             const source = audioContext.createBufferSource();
             source.buffer = audioBuffer;
-            source.connect(audioContext.destination);
             
-            source.start(0, currentTime, grainSize);
+            const gainNode = audioContext.createGain();
+            source.connect(gainNode);
+            gainNode.connect(audioContext.destination);
             
-            currentTime += grainSize;
+            const now = audioContext.currentTime;
+            const fadeTime = grainSize * 0.1;
             
-            const delay = (grainSize / playbackRate) * 1000;
+            gainNode.gain.setValueAtTime(0, now);
+            gainNode.gain.linearRampToValueAtTime(1, now + fadeTime);
+            gainNode.gain.setValueAtTime(1, now + grainSize - fadeTime);
+            gainNode.gain.linearRampToValueAtTime(0, now + grainSize);
+            
+            source.start(now, currentTime, grainSize);
+            
+            currentTime += grainSize * overlap;
+            
+            const delay = (grainSize * overlap / playbackRate) * 1000;
             setTimeout(playGrain, delay);
         }
 
