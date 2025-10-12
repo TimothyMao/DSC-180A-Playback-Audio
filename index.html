@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8" />
+    <title>Audio Speed Controller</title>
+    <style>
+        body{
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <h1>Audio Speed Controller</h1>
+    <audio id = "audio" src = "https://archive.org/download/short_poetry_092_librivox/andsodidi_cox_gg_64kb.mp3" controls></audio>
+    <p>Speed: <span id = "speedValue">1.0</span>x</p>
+
+    <input type = "range" id = "speedControl" min = "0.5" max = "3.0" step = "0.1" value = "1.0">
+
+    <br><br>
+    <button id = "playButton">Play / Pause</button>
+    <button id="rewindButton"> Rewind </button>
+
+    <script>
+        const audio = document.getElementById("audio");
+        const speedSlider = document.getElementById("speedControl");
+        const speedValue = document.getElementById("speedValue");
+        const playButton = document.getElementById("playButton");
+
+        playButton.addEventListener("click", () => {
+            if (audio.paused) {
+                audio.play();
+            } else {
+                audio.pause();
+            }
+        });
+        speedSlider.addEventListener("input", () => {
+            audio.playbackRate = speedSlider.value;
+            speedValue.textContent = speedSlider.value;
+        });
+        const rewindButton = document.getElementById("rewindButton");
+        rewindButton.addEventListener("click", () => {
+            audio.currentTime = Math.max(0, audio.currentTime - 10);
+            audio.play();
+        });
+    </script>
+</body>
+</html>
