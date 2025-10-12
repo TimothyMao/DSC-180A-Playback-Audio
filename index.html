@@ -21,67 +21,67 @@
     <script>
         let audioContext;
         let audioBuffer;
-        let sourceNode;
         let isPlaying = false;
-        let startTime = 0;
-        let pauseTime = 0;
+        let currentTime = 0;
         let playbackRate = 1.0;
+        
+        const grainSize = 0.05;
 
         const playButton = document.getElementById("playButton");
         const speedSlider = document.getElementById("speedSlider");
         const speedValue = document.getElementById("speedValue");
-        const statusDiv = document.getElementById("status");
 
         async function loadAudio() {
             try {
                 audioContext = new AudioContext();
-                
                 const response = await fetch('./counting-and-math-rhymes-043-the-twelve-days-of-christmas.4992.mp3');
                 const arrayBuffer = await response.arrayBuffer();
                 audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
-                
                 playButton.disabled = false;
             } catch (error) {
-                statusDiv.textContent = 'Error loading audio: ' + error.message;
                 console.error('Error loading audio:', error);
             }
         }
 
-        async function play() {
-            if (!audioBuffer) return;
-            if (audioContext.state === 'suspended') {
-                await audioContext.resume();
+        function playGrain() {
+            if (!isPlaying || currentTime >= audioBuffer.duration) {
+                if (currentTime >= audioBuffer.duration) {
+                    stop();
+                }
+                return;
             }
 
-            sourceNode = audioContext.createBufferSource();
-            sourceNode.buffer = audioBuffer;
-            sourceNode.playbackRate.value = playbackRate;
-            sourceNode.connect(audioContext.destination);
+            const source = audioContext.createBufferSource();
+            source.buffer = audioBuffer;
+            source.connect(audioContext.destination);
             
-            sourceNode.onended = () => {
-                if (isPlaying) {
-                    isPlaying = false;
-                    playButton.textContent = 'Play';
-                    pauseTime = 0;
-                }
-            };
+            source.start(0, currentTime, grainSize);
+            
+            currentTime += grainSize;
+            
+            const delay = (grainSize / playbackRate) * 1000;
+            setTimeout(playGrain, delay);
+        }
 
-            sourceNode.start(0, pauseTime);
-            startTime = audioContext.currentTime - pauseTime;
+        function play() {
+            if (!audioBuffer) return;
+            if (audioContext.state === 'suspended') {
+                audioContext.resume();
+            }
+            
             isPlaying = true;
             playButton.textContent = 'Pause';
-            
-            console.log('Playing audio at speed:', playbackRate);
-            console.log('Audio context state:', audioContext.state);
+            playGrain();
         }
 
         function pause() {
-            if (sourceNode) {
-                pauseTime = audioContext.currentTime - startTime;
-                sourceNode.stop();
-                sourceNode = null;
-            }
             isPlaying = false;
+            playButton.textContent = 'Play';
+        }
+
+        function stop() {
+            isPlaying = false;
+            currentTime = 0;
             playButton.textContent = 'Play';
         }
 
@@ -96,10 +96,6 @@
         speedSlider.addEventListener("input", (e) => {
             playbackRate = parseFloat(e.target.value);
             speedValue.textContent = playbackRate.toFixed(2);
-            
-            if (isPlaying && sourceNode) {
-                sourceNode.playbackRate.value = playbackRate;
-            }
         });
 
         loadAudio();
