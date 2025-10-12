@@ -4,43 +4,41 @@
     <meta charset="UTF-8" />
     <title>Audio Speed Controller</title>
     <style>
-        body {
-            text-align: center;
-        }
+        body { text-align: center; }
     </style>
 </head>
 <body>
     <h1>Audio Speed Controller</h1>
-
-    <button data-playing="false" role="switch" aria-checked="false">
-        <span>Play/Pause</span>
-    </button>
-
+    <button id="playButton">Play/Pause</button>
     <audio id="audioElement" src="https://archive.org/download/short_poetry_092_librivox/andsodidi_cox_64kb.mp3"></audio>
 
     <script>
-        const audioContext = new AudioContext();
-        const audioElement = document.getElementById("audioElement");
-        const track = audioContext.createMediaElementSource(audioElement);
-        track.connect(audioContext.destination);
+        let audioContext;
+        let trackCreated = false;
 
-        const playButton = document.querySelector("button");
+        const audioElement = document.getElementById("audioElement");
+        const playButton = document.getElementById("playButton");
 
         playButton.addEventListener("click", async () => {
+            if (!audioContext) {
+                audioContext = new AudioContext();
+            }
+
             if (audioContext.state === "suspended") {
                 await audioContext.resume();
             }
-            if (playButton.dataset.playing === "false") {
+
+            if (!trackCreated) {
+                const track = audioContext.createMediaElementSource(audioElement);
+                track.connect(audioContext.destination);
+                trackCreated = true;
+            }
+
+            if (audioElement.paused) {
                 audioElement.play();
-                playButton.dataset.playing = "true";
             } else {
                 audioElement.pause();
-                playButton.dataset.playing = "false";
             }
-        });
-
-        audioElement.addEventListener("ended", () => {
-            playButton.dataset.playing = "false";
         });
     </script>
 </body>
