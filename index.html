@@ -26,9 +26,9 @@
 
         const playButton = document.querySelector("button");
 
-        playButton.addEventListener("click", () => {
+        playButton.addEventListener("click", async () => {
             if (audioContext.state === "suspended") {
-                audioContext.resume();
+                await audioContext.resume();
             }
             if (playButton.dataset.playing === "false") {
                 audioElement.play();
