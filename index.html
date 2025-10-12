@@ -6,70 +6,101 @@
     <style>
         body {
             text-align: center;
-            font-family: Arial, sans-serif;
-            padding: 20px;
-        }
-        button {
-            padding: 10px 20px;
-            font-size: 16px;
-            margin: 10px;
-            cursor: pointer;
-        }
-        .speed-controls {
-            margin-top: 20px;
-        }
-        input[type="range"] {
-            width: 300px;
         }
     </style>
 </head>
 <body>
     <h1>Audio Speed Controller</h1>
-    <button id="playButton">Play/Pause</button>
+    <div id="status">Loading audio...</div>
+    <button id="playButton" disabled>Play</button>
     
     <div class="speed-controls">
-        <label for="speedSlider">Speed: <span id="speedValue">1.0</span>x</label><br>
-        <input type="range" id="speedSlider" min="0.25" max="2" step="0.25" value="1">
+        <label for="speedSlider">Playback Speed: <span id="speedValue">1.0</span>x</label><br>
+        <input type="range" id="speedSlider" min="0.5" max="2" step="0.01" value="1">
     </div>
-
-    <audio id="audioElement" crossorigin="anonymous" src="https://etc.usf.edu/lit2go/audio/mp3/counting-and-math-rhymes-043-the-twelve-days-of-christmas.4992.mp3"></audio>
 
     <script>
         let audioContext;
-        let trackCreated = false;
+        let audioBuffer;
+        let sourceNode;
+        let isPlaying = false;
+        let startTime = 0;
+        let pauseTime = 0;
+        let playbackRate = 1.0;
 
-        const audioElement = document.getElementById("audioElement");
         const playButton = document.getElementById("playButton");
         const speedSlider = document.getElementById("speedSlider");
         const speedValue = document.getElementById("speedValue");
+        const statusDiv = document.getElementById("status");
 
-        playButton.addEventListener("click", async () => {
-            if (!audioContext) {
+        // Load and decode audio
+        async function loadAudio() {
+            try {
                 audioContext = new AudioContext();
+                
+                const response = await fetch('./counting-and-math-rhymes-043-the-twelve-days-of-christmas.4992.mp3');
+                const arrayBuffer = await response.arrayBuffer();
+                audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+                
+                statusDiv.textContent = 'Ready to play!';
+                playButton.disabled = false;
+            } catch (error) {
+                statusDiv.textContent = 'Error loading audio: ' + error.message;
+                console.error('Error loading audio:', error);
             }
+        }
 
-            if (audioContext.state === "suspended") {
-                await audioContext.resume();
+        function play() {
+            if (!audioBuffer) return;
+
+            sourceNode = audioContext.createBufferSource();
+            sourceNode.buffer = audioBuffer;
+            sourceNode.playbackRate.value = playbackRate;
+            sourceNode.connect(audioContext.destination);
+            
+            sourceNode.onended = () => {
+                if (isPlaying) {
+                    isPlaying = false;
+                    playButton.textContent = 'Play';
+                    pauseTime = 0;
+                }
+            };
+
+            sourceNode.start(0, pauseTime);
+            startTime = audioContext.currentTime - pauseTime;
+            isPlaying = true;
+            playButton.textContent = 'Pause';
+        }
+
+        function pause() {
+            if (sourceNode) {
+                pauseTime = audioContext.currentTime - startTime;
+                sourceNode.stop();
+                sourceNode = null;
             }
+            isPlaying = false;
+            playButton.textContent = 'Play';
+        }
 
-            if (!trackCreated) {
-                const track = audioContext.createMediaElementSource(audioElement);
-                track.connect(audioContext.destination);
-                trackCreated = true;
-            }
-
-            if (audioElement.paused) {
-                audioElement.play();
+        playButton.addEventListener("click", () => {
+            if (isPlaying) {
+                pause();
             } else {
-                audioElement.pause();
+                play();
             }
         });
 
         speedSlider.addEventListener("input", (e) => {
-            const speed = parseFloat(e.target.value);
-            audioElement.playbackRate = speed;
-            speedValue.textContent = speed.toFixed(2);
+            playbackRate = parseFloat(e.target.value);
+            speedValue.textContent = playbackRate.toFixed(2);
+            
+            if (isPlaying && sourceNode) {
+                sourceNode.playbackRate.value = playbackRate;
+            }
         });
+
+        // Load audio on page load
+        loadAudio();
     </script>
 </body>
 </html>
