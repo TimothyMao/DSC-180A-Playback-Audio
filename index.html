@@ -7,110 +7,294 @@
         body {
             text-align: center;
         }
+        .controls {
+            margin: 20px;
+        }
+        #speedControl {
+            width: 400px;
+            height: 6px;
+            -webkit-appearance: none;
+            appearance: none;
+            background: #ddd;
+            outline: none;
+            border-radius: 3px;
+        }
+        #speedControl::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 24px;
+            height: 24px;
+            background: #000;
+            cursor: pointer;
+            border-radius: 50%;
+        }
+        input[type=number]::-webkit-inner-spin-button,
+        input[type=number]::-webkit-outer-spin-button {
+            -webkit-appearance: none;
+            margin: 0;
+        }
+
+        #seekBar {
+            width: 200px;
+            height: 6px;
+            -webkit-appearance: none;
+            appearance: none;
+            background: #ddd;
+            outline: none;
+            border-radius: 3px;
+        }
+        #seekBar::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 24px;
+            height: 24px;
+            background: #000;
+            cursor: pointer;
+            border-radius: 50%;
+        }
+
     </style>
 </head>
 <body>
     <h1>Audio Speed Controller</h1>
-    <button id="playButton" disabled>Play</button>
+    <audio id="audio1" src="./songs-of-the-wind-on-a-southern-shore-and-other-poems-of-florida-003-song-of-the-wind-on-a-southern-shore.4377.mp3"></audio>
+    <audio id="audio2" src="./songs-of-the-wind-on-a-southern-shore-and-other-poems-of-florida-003-song-of-the-wind-on-a-southern-shore.4377.mp3"></audio>
     
-    <div class="speed-controls">
-        <label for="speedSlider">Playback Speed: <span id="speedValue">1.0</span>x</label><br>
-        <input type="range" id="speedSlider" min="0.5" max="2" step="0.01" value="1">
+    <div>
+        <p>Position: <span id="currentTime">0:00</span> / <span id="duration">0:00</span></p>
+        <input type="range" id="seekBar" min="0" max="100" value="0" step="0.1">
+    </div>
+    
+    <p>Speed: <span id="speedValue">1.0</span>x</p>
+    
+    <input type="range" id="speedControl" min="-2.0" max="2.0" step="0.01" value="1.0">
+    
+    <br><br>
+    <button id="playButton">Play / Pause</button>
+
+    <div class="controls">
+        <label>Segment Duration (s): <input type="number" id="chunkLength" value="1" step="0.1" min="0.1"></label><br>
+        <label>Segment Step (s): <input type="number" id="jumpSize" value="0.5" step="0.1" min="0.1"></label><br>
+        <label>Segment Interval (ms): <input type="number" id="updateInterval" value="500" step="50" min="50"></label>
     </div>
 
     <script>
-        let audioContext;
-        let audioBuffer;
-        let isPlaying = false;
-        let currentTime = 0;
-        let playbackRate = 1.0;
-        
-        const grainSize = 0.08;
-        const overlap = 0.25;
-
-        const playButton = document.getElementById("playButton");
-        const speedSlider = document.getElementById("speedSlider");
+        const audio1 = document.getElementById("audio1");
+        const audio2 = document.getElementById("audio2");
+        const speedSlider = document.getElementById("speedControl");
         const speedValue = document.getElementById("speedValue");
+        const playButton = document.getElementById("playButton");
+        const chunkLengthInput = document.getElementById("chunkLength");
+        const jumpSizeInput = document.getElementById("jumpSize");
+        const updateIntervalInput = document.getElementById("updateInterval");
+        const seekBar = document.getElementById("seekBar");
+        const currentTimeDisplay = document.getElementById("currentTime");
+        const durationDisplay = document.getElementById("duration");
 
-        async function loadAudio() {
-            try {
+        let audioContext;
+        let source1, source2;
+        let gainNode1, gainNode2;
+        let initialized = false;
+        let intervalId = null;
+        let currentSpeed = 1.0;
+        let isPlaying = false;
+        let currentPosition = 0;
+
+        function formatTime(seconds) {
+            const mins = Math.floor(seconds / 60);
+            const secs = Math.floor(seconds % 60);
+            return `${mins}:${secs.toString().padStart(2, '0')}`;
+        }
+
+        audio1.addEventListener("loadedmetadata", () => {
+            seekBar.max = audio1.duration;
+            durationDisplay.textContent = formatTime(audio1.duration);
+        });
+
+        setInterval(() => {
+            if (isPlaying) {
+                currentTimeDisplay.textContent = formatTime(currentPosition);
+                seekBar.value = currentPosition;
+            }
+        }, 100);
+
+        seekBar.addEventListener("input", () => {
+            currentPosition = parseFloat(seekBar.value);
+            currentTimeDisplay.textContent = formatTime(currentPosition);
+            if (currentSpeed >= 0) {
+                audio1.currentTime = currentPosition;
+                audio2.currentTime = currentPosition;
+            }
+        });
+
+        function initAudioContext() {
+            if (!initialized) {
                 audioContext = new AudioContext();
-                const response = await fetch('./counting-and-math-rhymes-043-the-twelve-days-of-christmas.4992.mp3');
-                const arrayBuffer = await response.arrayBuffer();
-                audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
-                playButton.disabled = false;
-            } catch (error) {
-                console.error('Error loading audio:', error);
+                source1 = audioContext.createMediaElementSource(audio1);
+                source2 = audioContext.createMediaElementSource(audio2);
+                
+                gainNode1 = audioContext.createGain();
+                gainNode2 = audioContext.createGain();
+                
+                source1.connect(gainNode1);
+                source2.connect(gainNode2);
+                gainNode1.connect(audioContext.destination);
+                gainNode2.connect(audioContext.destination);
+                
+                gainNode1.gain.value = 1.0;
+                gainNode2.gain.value = 1.0;
+                
+                initialized = true;
             }
         }
 
-        function playGrain() {
-            if (!isPlaying || currentTime >= audioBuffer.duration) {
-                if (currentTime >= audioBuffer.duration) {
-                    stop();
+        function startBackwardPlayback() {
+            if (intervalId) clearInterval(intervalId);
+            
+            const updateInterval = parseInt(updateIntervalInput.value);
+            const chunkLength = parseFloat(chunkLengthInput.value);
+            const jumpSize = parseFloat(jumpSizeInput.value);
+            const speed = Math.abs(currentSpeed);
+            
+            let useAudio1 = true;
+            let timeout1 = null;
+            let timeout2 = null;
+
+            audio1.currentTime = currentPosition;
+            audio1.playbackRate = speed;
+            audio1.play();
+            gainNode1.gain.value = 1.0;
+            gainNode2.gain.value = 0;
+
+            timeout1 = setTimeout(() => {
+                audio1.pause();
+            }, (chunkLength / speed) * 1000);
+            
+            intervalId = setInterval(() => {
+                if (!isPlaying) return;
+
+                currentPosition = Math.max(0, currentPosition - jumpSize);
+             
+                const activeAudio = useAudio1 ? audio2 : audio1;
+                const activeGain = useAudio1 ? gainNode2 : gainNode1;
+                const otherGain = useAudio1 ? gainNode1 : gainNode2;
+                const activeTimeout = useAudio1 ? timeout2 : timeout1;
+
+                if (activeTimeout) clearTimeout(activeTimeout);
+
+                activeGain.gain.setValueAtTime(0, audioContext.currentTime);
+                activeGain.gain.linearRampToValueAtTime(1.0, audioContext.currentTime + (updateInterval / 1000));
+
+                otherGain.gain.setValueAtTime(otherGain.gain.value, audioContext.currentTime);
+                otherGain.gain.linearRampToValueAtTime(0, audioContext.currentTime + (updateInterval / 1000));
+
+                activeAudio.currentTime = currentPosition;
+                activeAudio.playbackRate = speed;
+                activeAudio.play();
+
+                const newTimeout = setTimeout(() => {
+                    activeAudio.pause();
+                }, (chunkLength / speed) * 1000);
+                
+                if (useAudio1) {
+                    timeout2 = newTimeout;
+                } else {
+                    timeout1 = newTimeout;
                 }
-                return;
+                
+                useAudio1 = !useAudio1;
+                
+                if (currentPosition <= 0) {
+                    stopPlayback();
+                }
+            }, updateInterval);
+        }
+
+        function stopBackwardPlayback() {
+            if (intervalId) {
+                clearInterval(intervalId);
+                intervalId = null;
             }
-
-            const source = audioContext.createBufferSource();
-            source.buffer = audioBuffer;
-            
-            const gainNode = audioContext.createGain();
-            source.connect(gainNode);
-            gainNode.connect(audioContext.destination);
-            
-            const now = audioContext.currentTime;
-            const fadeTime = grainSize * 0.1;
-            
-            gainNode.gain.setValueAtTime(0, now);
-            gainNode.gain.linearRampToValueAtTime(1, now + fadeTime);
-            gainNode.gain.setValueAtTime(1, now + grainSize - fadeTime);
-            gainNode.gain.linearRampToValueAtTime(0, now + grainSize);
-            
-            source.start(now, currentTime, grainSize);
-            
-            currentTime += grainSize * overlap;
-            
-            const delay = (grainSize * overlap / playbackRate) * 1000;
-            setTimeout(playGrain, delay);
+            audio1.pause();
+            audio2.pause();
         }
 
-        function play() {
-            if (!audioBuffer) return;
-            if (audioContext.state === 'suspended') {
-                audioContext.resume();
-            }
-            
-            isPlaying = true;
-            playButton.textContent = 'Pause';
-            playGrain();
+        function startForwardPlayback() {
+            stopBackwardPlayback();
+            audio2.pause();
+            audio1.currentTime = currentPosition;
+            audio1.playbackRate = currentSpeed;
+            audio1.play();
+
+            const updatePos = setInterval(() => {
+                if (!isPlaying || currentSpeed < 0) {
+                    clearInterval(updatePos);
+                    return;
+                }
+                currentPosition = audio1.currentTime;
+            }, 100);
         }
 
-        function pause() {
+        function stopPlayback() {
             isPlaying = false;
-            playButton.textContent = 'Play';
-        }
-
-        function stop() {
-            isPlaying = false;
-            currentTime = 0;
-            playButton.textContent = 'Play';
+            stopBackwardPlayback();
+            audio1.pause();
+            audio2.pause();
         }
 
         playButton.addEventListener("click", () => {
+            initAudioContext();
+            
             if (isPlaying) {
-                pause();
+                stopPlayback();
             } else {
-                play();
+                isPlaying = true;
+                if (currentSpeed < 0) {
+                    startBackwardPlayback();
+                } else {
+                    startForwardPlayback();
+                }
             }
         });
 
-        speedSlider.addEventListener("input", (e) => {
-            playbackRate = parseFloat(e.target.value);
-            speedValue.textContent = playbackRate.toFixed(2);
+        let speedChangeTimeout;
+        const defaultChunkLength = 1.0;
+        const defaultJumpSize = 0.5;
+        const defaultUpdateInterval = 500;
+        
+        speedSlider.addEventListener("input", () => {
+            currentSpeed = parseFloat(speedSlider.value);
+            speedValue.textContent = currentSpeed.toFixed(2);
+            
+            if (currentSpeed < 0) {
+                const absSpeed = Math.abs(currentSpeed);
+                chunkLengthInput.value = (defaultChunkLength * absSpeed).toFixed(2);
+                jumpSizeInput.value = (defaultJumpSize * absSpeed).toFixed(2);
+                updateIntervalInput.value = Math.round(defaultUpdateInterval / absSpeed);
+            }
+
+            clearTimeout(speedChangeTimeout);
+            speedChangeTimeout = setTimeout(() => {
+                if (isPlaying) {
+                    if (currentSpeed >= 0) {
+                        startForwardPlayback();
+                    } else {
+                        audio1.pause();
+                        startBackwardPlayback();
+                    }
+                }
+            }, 100);
+
+            if (isPlaying && currentSpeed >= 0) {
+                audio1.playbackRate = currentSpeed;
+            }
         });
 
-        loadAudio();
+        audio1.addEventListener("ended", () => {
+            if (currentSpeed >= 0) {
+                stopPlayback();
+            }
+        });
     </script>
 </body>
 </html>
