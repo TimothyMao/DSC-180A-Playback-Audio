@@ -28,14 +28,8 @@
             cursor: pointer;
             border-radius: 50%;
         }
-        input[type=number]::-webkit-inner-spin-button,
-        input[type=number]::-webkit-outer-spin-button {
-            -webkit-appearance: none;
-            margin: 0;
-        }
-
         #seekBar {
-            width: 300px;
+            width: 200px;
             height: 6px;
             -webkit-appearance: none;
             appearance: none;
@@ -51,6 +45,12 @@
             background: #000;
             cursor: pointer;
             border-radius: 50%;
+        }
+
+        input[type=number]::-webkit-inner-spin-button,
+        input[type=number]::-webkit-outer-spin-button {
+            -webkit-appearance: none;
+            margin: 0;
         }
 
     </style>
@@ -172,7 +172,7 @@
             
             intervalId = setInterval(() => {
                 if (!isPlaying) return;
-
+                
                 currentPosition = Math.max(0, currentPosition - jumpSize);
              
                 const activeAudio = useAudio1 ? audio2 : audio1;
@@ -258,20 +258,9 @@
         });
 
         let speedChangeTimeout;
-        const defaultChunkLength = 1.0;
-        const defaultJumpSize = 0.5;
-        const defaultUpdateInterval = 500;
-        
         speedSlider.addEventListener("input", () => {
             currentSpeed = parseFloat(speedSlider.value);
             speedValue.textContent = currentSpeed.toFixed(2);
-            
-            if (currentSpeed < 0) {
-                const absSpeed = Math.abs(currentSpeed);
-                chunkLengthInput.value = (defaultChunkLength * absSpeed).toFixed(2);
-                jumpSizeInput.value = (defaultJumpSize * absSpeed).toFixed(2);
-                updateIntervalInput.value = Math.round(defaultUpdateInterval / absSpeed);
-            }
 
             clearTimeout(speedChangeTimeout);
             speedChangeTimeout = setTimeout(() => {
@@ -284,7 +273,7 @@
                     }
                 }
             }, 100);
-
+            
             if (isPlaying && currentSpeed >= 0) {
                 audio1.playbackRate = currentSpeed;
             }
