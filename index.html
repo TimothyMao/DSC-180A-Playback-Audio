@@ -268,9 +268,9 @@
             if (currentSpeed < 0) {
                 const absSpeed = Math.abs(currentSpeed);
                 jumpSizeInput.value = absSpeed.toFixed(2);
-                updateIntervalInput.value = 1000;
+                updateIntervalInput.value = 500;
             }
-            
+
             clearTimeout(speedChangeTimeout);
             speedChangeTimeout = setTimeout(() => {
                 if (isPlaying) {
