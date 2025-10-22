@@ -155,7 +155,8 @@
             const updateInterval = parseInt(updateIntervalInput.value);
             const chunkLength = parseFloat(chunkLengthInput.value);
             const jumpSize = parseFloat(jumpSizeInput.value);
-            const playbackSpeed = parseFloat(reversePlaybackSpeedInput.value);
+            const reversePlaybackSpeed = parseFloat(reversePlaybackSpeedInput.value);
+            const playbackSpeed = jumpSize / (updateInterval / 1000);
             
             let useAudio1 = true;
             let timeout1 = null;
