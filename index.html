@@ -265,6 +265,12 @@
             currentSpeed = parseFloat(speedSlider.value);
             speedValue.textContent = currentSpeed.toFixed(2);
 
+            if (currentSpeed < 0) {
+                const absSpeed = Math.abs(currentSpeed);
+                jumpSizeInput.value = absSpeed.toFixed(2);
+                updateIntervalInput.value = 1000;
+            }
+            
             clearTimeout(speedChangeTimeout);
             speedChangeTimeout = setTimeout(() => {
                 if (isPlaying) {
