@@ -236,15 +236,24 @@
 
         function startForwardPlayback() {
             stopBackwardPlayback();
-            
+
             gainNode1.gain.cancelScheduledValues(audioContext.currentTime);
             gainNode2.gain.cancelScheduledValues(audioContext.currentTime);
             gainNode1.gain.value = 1.0;
             gainNode2.gain.value = 0;
-            
+
+            audio2.pause();
+            audio2.currentTime = 0;
+
             audio1.currentTime = currentPosition;
-            audio1.playbackRate = currentSpeed;
-            audio1.play();
+            audio1.playbackRate = Math.max(0.0625, currentSpeed);
+
+            const playPromise = audio1.play();
+            if (playPromise !== undefined) {
+                playPromise.catch(error => {
+                    console.error("Play failed:", error);
+                });
+            }
 
             const updatePos = setInterval(() => {
                 if (!isPlaying || currentSpeed < 0) {
@@ -319,7 +328,7 @@
             }, 300);
 
             if (isPlaying && currentSpeed >= 0) {
-                audio1.playbackRate = currentSpeed;
+                audio1.playbackRate = Math.max(0.0625, currentSpeed);
             }
         });
 
