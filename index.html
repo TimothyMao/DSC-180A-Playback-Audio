@@ -295,21 +295,14 @@
                 updateIntervalInput.value = (1000 / absSpeed).toFixed(0);
             }
 
-            if (isPlaying && currentSpeed >= 0 && initialized) {
-                gainNode1.gain.cancelScheduledValues(audioContext.currentTime);
-                gainNode2.gain.cancelScheduledValues(audioContext.currentTime);
-                gainNode1.gain.value = 1.0;
-                gainNode2.gain.value = 0;
-            }
-
             if (isPlaying && crossedZero) {
                 clearTimeout(speedChangeTimeout);
                 wasNegative = currentSpeed < 0;
+                
                 if (currentSpeed >= 0) {
                     startForwardPlayback();
                 } else {
                     currentPosition = audio1.currentTime;
-                    audio1.pause();
                     startBackwardPlayback();
                 }
                 return;
@@ -318,19 +311,12 @@
             clearTimeout(speedChangeTimeout);
             speedChangeTimeout = setTimeout(() => {
                 if (isPlaying) {
-                    const needsRestart = (prevWasNegative && currentSpeed >= 0) || (!prevWasNegative && currentSpeed < 0);
-                    
-                    if (needsRestart) {
-                        if (currentSpeed >= 0) {
-                            startForwardPlayback();
-                        } else {
-                            audio1.pause();
-                            startBackwardPlayback();
-                        }
+                    if (currentSpeed < 0) {
+                        startBackwardPlayback();
                     }
                 }
                 wasNegative = currentSpeed < 0;
-            }, 150);
+            }, 300);
 
             if (isPlaying && currentSpeed >= 0) {
                 audio1.playbackRate = currentSpeed;
