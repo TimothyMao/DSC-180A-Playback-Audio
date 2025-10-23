@@ -264,7 +264,8 @@
             currentSpeed = parseFloat(speedSlider.value);
             speedValue.textContent = currentSpeed.toFixed(2);
 
-            if (currentSpeed < 0) {
+
+            if (currentSpeed < -0.1) {
                 const absSpeed = Math.abs(currentSpeed);
                 jumpSizeInput.value = 1.0;
                 updateIntervalInput.value = (1000 / absSpeed).toFixed(0);
