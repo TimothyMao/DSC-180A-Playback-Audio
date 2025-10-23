@@ -155,8 +155,7 @@
             const updateInterval = parseInt(updateIntervalInput.value);
             const chunkLength = parseFloat(chunkLengthInput.value);
             const jumpSize = parseFloat(jumpSizeInput.value);
-            const reversePlaybackSpeed = parseFloat(reversePlaybackSpeedInput.value);
-            const playbackSpeed = jumpSize / (updateInterval / 1000);
+            const playbackSpeed = parseFloat(reversePlaybackSpeedInput.value);
             
             let useAudio1 = true;
             let timeout1 = null;
@@ -267,8 +266,8 @@
 
             if (currentSpeed < 0) {
                 const absSpeed = Math.abs(currentSpeed);
-                jumpSizeInput.value = (absSpeed * 0.5).toFixed(2);
-                updateIntervalInput.value = 500;
+                jumpSizeInput.value = 1;
+                updateIntervalInput.value = (1000 / absSpeed).toFixed(0);
             }
 
             clearTimeout(speedChangeTimeout);
