@@ -169,7 +169,7 @@
             
             timeout1 = setTimeout(() => {
                 audio1.pause();
-            }, chunkLength * 1000);
+            }, updateInterval + (chunkLength * 1000));
             
             intervalId = setInterval(() => {
                 if (!isPlaying) return;
@@ -195,7 +195,7 @@
 
                 const newTimeout = setTimeout(() => {
                     activeAudio.pause();
-                }, chunkLength * 1000);
+                }, updateInterval + (chunkLength * 1000));
                 
                 if (useAudio1) {
                     timeout2 = newTimeout;
@@ -264,7 +264,6 @@
             currentSpeed = parseFloat(speedSlider.value);
             speedValue.textContent = currentSpeed.toFixed(2);
 
-            // Update parameters based on speed
             if (currentSpeed < 0) {
                 const absSpeed = Math.abs(currentSpeed);
                 jumpSizeInput.value = 1.0;
