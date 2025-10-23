@@ -264,9 +264,10 @@
             currentSpeed = parseFloat(speedSlider.value);
             speedValue.textContent = currentSpeed.toFixed(2);
 
+            // Update parameters based on speed
             if (currentSpeed < 0) {
                 const absSpeed = Math.abs(currentSpeed);
-                jumpSizeInput.value = 1;
+                jumpSizeInput.value = 1.0;
                 updateIntervalInput.value = (1000 / absSpeed).toFixed(0);
             }
 
@@ -280,7 +281,7 @@
                         startBackwardPlayback();
                     }
                 }
-            }, 100);
+            }, 300);
 
             if (isPlaying && currentSpeed >= 0) {
                 audio1.playbackRate = currentSpeed;
