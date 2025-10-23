@@ -237,6 +237,12 @@
         function startForwardPlayback() {
             stopBackwardPlayback();
             audio2.pause();
+
+            gainNode1.gain.cancelScheduledValues(audioContext.currentTime);
+            gainNode2.gain.cancelScheduledValues(audioContext.currentTime);
+            gainNode1.gain.value = 1.0;
+            gainNode2.gain.value = 0;
+            
             audio1.currentTime = currentPosition;
             audio1.playbackRate = currentSpeed;
             audio1.play();
