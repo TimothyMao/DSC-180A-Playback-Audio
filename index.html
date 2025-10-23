@@ -282,10 +282,12 @@
         let wasNegative = false;
         
         speedSlider.addEventListener("input", () => {
+            const prevSpeed = currentSpeed;
             currentSpeed = parseFloat(speedSlider.value);
             speedValue.textContent = currentSpeed.toFixed(2);
             
             const isNegativeNow = currentSpeed < -0.1;
+            const crossedZero = (prevSpeed >= 0 && currentSpeed < 0) || (prevSpeed < 0 && currentSpeed >= 0);
 
             if (isNegativeNow) {
                 const absSpeed = Math.abs(currentSpeed);
@@ -298,6 +300,18 @@
                 gainNode2.gain.cancelScheduledValues(audioContext.currentTime);
                 gainNode1.gain.value = 1.0;
                 gainNode2.gain.value = 0;
+            }
+
+            if (isPlaying && crossedZero) {
+                clearTimeout(speedChangeTimeout);
+                if (currentSpeed >= 0) {
+                    startForwardPlayback();
+                } else {
+                    audio1.pause();
+                    startBackwardPlayback();
+                }
+                wasNegative = currentSpeed < 0;
+                return;
             }
 
             clearTimeout(speedChangeTimeout);
