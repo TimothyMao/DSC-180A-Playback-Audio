@@ -283,6 +283,7 @@
         
         speedSlider.addEventListener("input", () => {
             const prevSpeed = currentSpeed;
+            const prevWasNegative = wasNegative;
             currentSpeed = parseFloat(speedSlider.value);
             speedValue.textContent = currentSpeed.toFixed(2);
             
@@ -304,20 +305,21 @@
 
             if (isPlaying && crossedZero) {
                 clearTimeout(speedChangeTimeout);
+                wasNegative = currentSpeed < 0;
                 if (currentSpeed >= 0) {
                     startForwardPlayback();
                 } else {
+                    currentPosition = audio1.currentTime;
                     audio1.pause();
                     startBackwardPlayback();
                 }
-                wasNegative = currentSpeed < 0;
                 return;
             }
 
             clearTimeout(speedChangeTimeout);
             speedChangeTimeout = setTimeout(() => {
                 if (isPlaying) {
-                    const needsRestart = (wasNegative && currentSpeed >= 0) || (!wasNegative && currentSpeed < 0);
+                    const needsRestart = (prevWasNegative && currentSpeed >= 0) || (!prevWasNegative && currentSpeed < 0);
                     
                     if (needsRestart) {
                         if (currentSpeed >= 0) {
