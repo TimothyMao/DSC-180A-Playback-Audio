@@ -327,6 +327,12 @@
                 stopPlayback();
             }
         });
+
+        reversePlaybackSpeedInput.addEventListener("input", () => {
+            if (isPlaying && currentSpeed < 0) {
+                startBackwardPlayback();
+            }
+        });
     </script>
 </body>
 </html>
