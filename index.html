@@ -161,6 +161,9 @@
             let timeout1 = null;
             let timeout2 = null;
 
+            window.backwardTimeout1 = null;
+            window.backwardTimeout2 = null;
+
             audio1.currentTime = currentPosition;
             audio1.playbackRate = playbackSpeed;
             audio1.play();
@@ -170,6 +173,7 @@
             timeout1 = setTimeout(() => {
                 audio1.pause();
             }, updateInterval + (chunkLength * 1000));
+            window.backwardTimeout1 = timeout1;
             
             intervalId = setInterval(() => {
                 if (!isPlaying) return;
@@ -199,8 +203,10 @@
                 
                 if (useAudio1) {
                     timeout2 = newTimeout;
+                    window.backwardTimeout2 = newTimeout;
                 } else {
                     timeout1 = newTimeout;
+                    window.backwardTimeout1 = newTimeout;
                 }
                 
                 useAudio1 = !useAudio1;
@@ -215,6 +221,14 @@
             if (intervalId) {
                 clearInterval(intervalId);
                 intervalId = null;
+            }
+            if (window.backwardTimeout1) {
+                clearTimeout(window.backwardTimeout1);
+                window.backwardTimeout1 = null;
+            }
+            if (window.backwardTimeout2) {
+                clearTimeout(window.backwardTimeout2);
+                window.backwardTimeout2 = null;
             }
             audio1.pause();
             audio2.pause();
@@ -263,7 +277,6 @@
         speedSlider.addEventListener("input", () => {
             currentSpeed = parseFloat(speedSlider.value);
             speedValue.textContent = currentSpeed.toFixed(2);
-
 
             if (currentSpeed < -0.1) {
                 const absSpeed = Math.abs(currentSpeed);
