@@ -66,7 +66,7 @@
     
     <p>Speed: <span id="speedValue">1.0</span>x</p>
     
-    <input type="range" id="speedControl" min="-2.0" max="2.0" step="0.01" value="1.0">
+    <input type="range" id="speedControl" min="-4.0" max="2.0" step="0.01" value="1.0">
     
     <br><br>
     <button id="playButton">Play / Pause</button>
@@ -74,7 +74,7 @@
     <div class="controls">
         <label>Segment Duration (s): <input type="number" id="chunkLength" value="1" step="0.1" min="0.1"></label><br>
         <label>Step (how far back to jump) (s): <input type="number" id="jumpSize" value="0.5" step="0.1" min="0.1"></label><br>
-        <label>Period (how often to jump) (ms): <input type="number" id="updateInterval" value="500" step="50" min="50"></label><br>
+        <label>Period (how often to jump) (ms): <input type="number" id="updateInterval" value="500" step="50" min="250"></label><br>
         <label>Reverse Playback Speed: <input type="number" id="reversePlaybackSpeed" value="1.0" step="0.1" min="0.1" max="2.0"></label>
     </div>
 
@@ -172,7 +172,7 @@
             
             timeout1 = setTimeout(() => {
                 audio1.pause();
-            }, updateInterval + (chunkLength * 1000));
+            }, (chunkLength * 1000) / playbackSpeed);
             window.backwardTimeout1 = timeout1;
             
             intervalId = setInterval(() => {
@@ -199,7 +199,7 @@
 
                 const newTimeout = setTimeout(() => {
                     activeAudio.pause();
-                }, updateInterval + (chunkLength * 1000));
+                }, (chunkLength * 1000) / playbackSpeed);
                 
                 if (useAudio1) {
                     timeout2 = newTimeout;
