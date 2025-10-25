@@ -183,32 +183,26 @@
                 const activeAudio = useAudio1 ? audio2 : audio1;
                 const activeGain = useAudio1 ? gainNode2 : gainNode1;
                 const otherGain = useAudio1 ? gainNode1 : gainNode2;
-                const activeTimeout = useAudio1 ? timeout2 : timeout1;
+                const otherAudio = useAudio1 ? audio1 : audio2;
 
-                if (activeTimeout) clearTimeout(activeTimeout);
+                const now = audioContext.currentTime;
+                const fadeTime = 0.2; 
+                const chunkDuration = (chunkLength * 1000) / playbackSpeed / 1000; 
 
-                activeGain.gain.setValueAtTime(0, audioContext.currentTime);
-                activeGain.gain.linearRampToValueAtTime(1.0, audioContext.currentTime + (updateInterval / 1000));
-
-                otherGain.gain.setValueAtTime(otherGain.gain.value, audioContext.currentTime);
-                otherGain.gain.linearRampToValueAtTime(0, audioContext.currentTime + (updateInterval / 1000));
+                activeGain.gain.cancelScheduledValues(now);
+                activeGain.gain.setValueAtTime(0, now);
+                activeGain.gain.linearRampToValueAtTime(1.0, now + fadeTime);
+                activeGain.gain.setValueAtTime(1.0, now + chunkDuration - fadeTime);
+                activeGain.gain.linearRampToValueAtTime(0, now + chunkDuration); 
 
                 activeAudio.currentTime = currentPosition;
                 activeAudio.playbackRate = playbackSpeed;
                 activeAudio.play();
 
-                const newTimeout = setTimeout(() => {
-                    activeAudio.pause();
-                }, (chunkLength * 1000) / playbackSpeed);
-                
-                if (useAudio1) {
-                    timeout2 = newTimeout;
-                    window.backwardTimeout2 = newTimeout;
-                } else {
-                    timeout1 = newTimeout;
-                    window.backwardTimeout1 = newTimeout;
-                }
-                
+                setTimeout(() => {
+                    otherAudio.pause();
+                }, fadeTime * 1000);
+
                 useAudio1 = !useAudio1;
                 
                 if (currentPosition <= 0) {
