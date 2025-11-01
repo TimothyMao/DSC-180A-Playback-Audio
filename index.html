@@ -10,7 +10,7 @@
         .controls {
             margin: 20px;
         }
-        #speedControl {
+        #speedControl, #filteredSpeedControl, #seekBar {
             width: 400px;
             height: 6px;
             -webkit-appearance: none;
@@ -19,7 +19,10 @@
             outline: none;
             border-radius: 3px;
         }
-        #speedControl::-webkit-slider-thumb {
+        #seekBar { width: 200px; }
+        #speedControl::-webkit-slider-thumb,
+        #filteredSpeedControl::-webkit-slider-thumb,
+        #seekBar::-webkit-slider-thumb {
             -webkit-appearance: none;
             appearance: none;
             width: 24px;
@@ -33,49 +36,36 @@
             -webkit-appearance: none;
             margin: 0;
         }
-
-        #seekBar {
-            width: 200px;
-            height: 6px;
-            -webkit-appearance: none;
-            appearance: none;
-            background: #ddd;
-            outline: none;
-            border-radius: 3px;
-        }
-        #seekBar::-webkit-slider-thumb {
-            -webkit-appearance: none;
-            appearance: none;
-            width: 24px;
-            height: 24px;
-            background: #000;
-            cursor: pointer;
-            border-radius: 50%;
-        }
     </style>
 </head>
 <body>
     <h1>Audio Speed Controller</h1>
     <audio id="audio1" src="./songs-of-the-wind-on-a-southern-shore-and-other-poems-of-florida-003-song-of-the-wind-on-a-southern-shore.4377.mp3"></audio>
     <audio id="audio2" src="./songs-of-the-wind-on-a-southern-shore-and-other-poems-of-florida-003-song-of-the-wind-on-a-southern-shore.4377.mp3"></audio>
-    
+
     <div>
         <p>Position: <span id="currentTime">0:00</span> / <span id="duration">0:00</span></p>
         <input type="range" id="seekBar" min="0" max="100" value="0" step="0.1">
     </div>
-    
+
     <p>Speed: <span id="speedValue">1.0</span>x</p>
-    
     <input type="range" id="speedControl" min="-4.0" max="2.0" step="0.01" value="1.0">
-    
+
+    <br><br>
+    <p>Filtered Speed: <span id="filteredSpeedValue">1.0</span>x</p>
+    <input type="range" id="filteredSpeedControl" min="-4.0" max="2.0" step="0.01" value="1.0" disabled>
+
+    <br><br>
+    <label>Alpha (how fast the slider follows): <input type="number" id="alphaInput" value="0.005" step="0.01" min="0.01" max="1.0"></label>
+
     <br><br>
     <button id="playButton">Play / Pause</button>
 
     <div class="controls">
-        <label>Segment Duration (s): <input type="number" id="chunkLength" value="1" step="0.1" min="0.1"></label><br>
+        <label>Segment Duration (length of audio being played) (s): <input type="number" id="chunkLength" value="1" step="0.1" min="0.1"></label><br>
         <label>Step (how far back to jump) (s): <input type="number" id="jumpSize" value="0.5" step="0.1" min="0.1"></label><br>
         <label>Period (how often to jump) (ms): <input type="number" id="updateInterval" value="500" step="50" min="250"></label><br>
-        <label>Reverse Playback Speed: <input type="number" id="reversePlaybackSpeed" value="1.0" step="0.1" min="0.1" max="2.0" readonly></label>
+        <label>Reverse Playback Speed: <input type="number" id="reversePlaybackSpeed" value="1.0" step="0.1" min="0.1" max="2.0"></label>
     </div>
 
     <script>
@@ -83,6 +73,9 @@
         const audio2 = document.getElementById("audio2");
         const speedSlider = document.getElementById("speedControl");
         const speedValue = document.getElementById("speedValue");
+        const filteredSpeedSlider = document.getElementById("filteredSpeedControl");
+        const filteredSpeedValue = document.getElementById("filteredSpeedValue");
+        const alphaInput = document.getElementById("alphaInput");
         const playButton = document.getElementById("playButton");
         const chunkLengthInput = document.getElementById("chunkLength");
         const jumpSizeInput = document.getElementById("jumpSize");
@@ -98,13 +91,111 @@
         let initialized = false;
         let intervalId = null;
         let currentSpeed = 1.0;
+        let filteredSpeed = 1.0;
         let isPlaying = false;
         let currentPosition = 0;
+        let filterAnimationId = null;
+        let positionUpdateInterval = null;
+        let isTransitioning = false;
 
         function formatTime(seconds) {
             const mins = Math.floor(seconds / 60);
             const secs = Math.floor(seconds % 60);
             return `${mins}:${secs.toString().padStart(2, '0')}`;
+        }
+
+        function updateFilteredSpeed() {
+            const alpha = parseFloat(alphaInput.value);
+            const targetSpeed = currentSpeed;
+            const prevFilteredSpeed = filteredSpeed;
+            filteredSpeed = filteredSpeed - alpha * (filteredSpeed - targetSpeed);
+            filteredSpeedValue.textContent = filteredSpeed.toFixed(2);
+            filteredSpeedSlider.value = filteredSpeed;
+            const crossedZeroFiltered = (prevFilteredSpeed < 0 && filteredSpeed >= 0) || (prevFilteredSpeed >= 0 && filteredSpeed < 0);
+            
+            if (isPlaying && crossedZeroFiltered) {
+                if (filteredSpeed >= 0) {
+                    if (isTransitioning) return;
+                    isTransitioning = true;
+                    if (audio1.readyState >= 2 && !audio1.paused) {
+                        currentPosition = audio1.currentTime;
+                    }
+                    stopBackwardPlayback();
+                    
+                    setTimeout(() => {
+                        if (!isPlaying || currentSpeed < 0) {
+                            isTransitioning = false;
+                            return;
+                        }
+
+                        if (positionUpdateInterval) {
+                            clearInterval(positionUpdateInterval);
+                            positionUpdateInterval = null;
+                        }
+                        
+                        gainNode1.gain.cancelScheduledValues(audioContext.currentTime);
+                        gainNode2.gain.cancelScheduledValues(audioContext.currentTime);
+                        gainNode1.gain.value = 1.0;
+                        gainNode2.gain.value = 0;
+                        audio2.pause();
+                        audio1.currentTime = currentPosition;
+                        audio1.playbackRate = Math.max(0.0625, Math.abs(filteredSpeed));
+                        const playPromise = audio1.play();
+                        if (playPromise !== undefined) {
+                            playPromise.then(() => {
+                                isTransitioning = false;
+                                positionUpdateInterval = setInterval(() => {
+                                    if (!isPlaying || currentSpeed < 0) {
+                                        clearInterval(positionUpdateInterval);
+                                        positionUpdateInterval = null;
+                                        return;
+                                    }
+                                    if (audio1.readyState >= 2 && !audio1.paused) {
+                                        currentPosition = audio1.currentTime;
+                                    }
+                                }, 50);
+                            }).catch(error => {
+                                isTransitioning = false;
+                            });
+                        } else {
+                            isTransitioning = false;
+                        }
+                    }, 100);
+                } else {
+                    if (isTransitioning) return;
+                    isTransitioning = true;
+                    
+                    currentPosition = audio1.currentTime || currentPosition;
+                    audio1.pause();
+                    if (positionUpdateInterval) {
+                        clearInterval(positionUpdateInterval);
+                        positionUpdateInterval = null;
+                    }
+                    setTimeout(() => {
+                        if (!isPlaying || currentSpeed >= 0) {
+                            isTransitioning = false;
+                            return;
+                        }
+                        startBackwardPlayback();
+                        isTransitioning = false;
+                    }, 100);
+                }
+            }
+            if (isPlaying && filteredSpeed >= 0) {
+                audio1.playbackRate = Math.max(0.0625, Math.abs(filteredSpeed));
+            }
+            const diff = Math.abs(filteredSpeed - targetSpeed);
+            if (diff > 0.001) {
+                filterAnimationId = requestAnimationFrame(updateFilteredSpeed);
+            } else {
+                filteredSpeed = targetSpeed;
+                filteredSpeedValue.textContent = filteredSpeed.toFixed(2);
+                filteredSpeedSlider.value = filteredSpeed;
+                filterAnimationId = null;
+                if (isPlaying && filteredSpeed >= 0) {
+                    audio1.playbackRate = Math.max(0.0625, Math.abs(filteredSpeed));
+                }
+            }
         }
 
         audio1.addEventListener("loadedmetadata", () => {
@@ -114,6 +205,9 @@
 
         setInterval(() => {
             if (isPlaying) {
+                if (currentSpeed >= 0 && audio1.readyState >= 2) {
+                    currentPosition = audio1.currentTime;
+                }
                 currentTimeDisplay.textContent = formatTime(currentPosition);
                 seekBar.value = currentPosition;
             }
@@ -133,83 +227,70 @@
                 audioContext = new AudioContext();
                 source1 = audioContext.createMediaElementSource(audio1);
                 source2 = audioContext.createMediaElementSource(audio2);
-                
                 gainNode1 = audioContext.createGain();
                 gainNode2 = audioContext.createGain();
-                
                 source1.connect(gainNode1);
                 source2.connect(gainNode2);
                 gainNode1.connect(audioContext.destination);
                 gainNode2.connect(audioContext.destination);
-                
                 gainNode1.gain.value = 1.0;
                 gainNode2.gain.value = 1.0;
-                
                 initialized = true;
             }
         }
 
         function startBackwardPlayback() {
             if (intervalId) clearInterval(intervalId);
+            let useAudio1 = true;
             
-            const updateInterval = parseInt(updateIntervalInput.value);
             const chunkLength = parseFloat(chunkLengthInput.value);
             const jumpSize = parseFloat(jumpSizeInput.value);
-            const calculatedSpeed = (chunkLength * 1000) / updateInterval;
-            const playbackSpeed = Math.max(0.1, Math.min(2.0, calculatedSpeed));
-            
-            let useAudio1 = true;
-            let timeout1 = null;
-            let timeout2 = null;
-
-            window.backwardTimeout1 = null;
-            window.backwardTimeout2 = null;
-
+            const playbackSpeed = parseFloat(reversePlaybackSpeedInput.value);
             audio1.currentTime = currentPosition;
             audio1.playbackRate = playbackSpeed;
             audio1.play();
             gainNode1.gain.value = 1.0;
             gainNode2.gain.value = 0;
             
-            timeout1 = setTimeout(() => {
-                audio1.pause();
-            }, (chunkLength * 1000) / playbackSpeed);
-            window.backwardTimeout1 = timeout1;
-            
-            intervalId = setInterval(() => {
+            const scheduleNext = () => {
                 if (!isPlaying) return;
-                
+                const currentInterval = 1000 / Math.abs(currentSpeed);
                 currentPosition = Math.max(0, currentPosition - jumpSize);
-             
+                
                 const activeAudio = useAudio1 ? audio2 : audio1;
                 const activeGain = useAudio1 ? gainNode2 : gainNode1;
                 const otherGain = useAudio1 ? gainNode1 : gainNode2;
                 const otherAudio = useAudio1 ? audio1 : audio2;
-
+                
                 const now = audioContext.currentTime;
-                const fadeTime = 0.2; 
-                const chunkDuration = (chunkLength * 1000) / playbackSpeed / 1000; 
-
+                const fadeTime = 0.2;
+                const chunkDuration = chunkLength / playbackSpeed;
                 activeGain.gain.cancelScheduledValues(now);
                 activeGain.gain.setValueAtTime(0, now);
                 activeGain.gain.linearRampToValueAtTime(1.0, now + fadeTime);
                 activeGain.gain.setValueAtTime(1.0, now + chunkDuration - fadeTime);
-                activeGain.gain.linearRampToValueAtTime(0, now + chunkDuration); 
-
+                activeGain.gain.linearRampToValueAtTime(0, now + chunkDuration);
+                
+                otherGain.gain.cancelScheduledValues(now);
+                otherGain.gain.setValueAtTime(otherGain.gain.value, now);
+                otherGain.gain.linearRampToValueAtTime(0, now + fadeTime);
                 activeAudio.currentTime = currentPosition;
                 activeAudio.playbackRate = playbackSpeed;
                 activeAudio.play();
-
                 setTimeout(() => {
                     otherAudio.pause();
                 }, fadeTime * 1000);
-
+                
                 useAudio1 = !useAudio1;
                 
                 if (currentPosition <= 0) {
                     stopPlayback();
+                } else {
+                    intervalId = setTimeout(scheduleNext, currentInterval);
                 }
-            }, updateInterval);
+            };
+            const initialInterval = 1000 / Math.abs(currentSpeed);
+            intervalId = setTimeout(scheduleNext, initialInterval);
         }
 
         function stopBackwardPlayback() {
@@ -231,44 +312,46 @@
 
         function startForwardPlayback() {
             stopBackwardPlayback();
-
+            if (positionUpdateInterval) {
+                clearInterval(positionUpdateInterval);
+            }
+            
             gainNode1.gain.cancelScheduledValues(audioContext.currentTime);
             gainNode2.gain.cancelScheduledValues(audioContext.currentTime);
             gainNode1.gain.value = 1.0;
             gainNode2.gain.value = 0;
-
             audio2.pause();
             audio2.currentTime = 0;
-
             audio1.currentTime = currentPosition;
-            audio1.playbackRate = Math.max(0.0625, currentSpeed);
-
-            const playPromise = audio1.play();
-            if (playPromise !== undefined) {
-                playPromise.catch(error => {
-                    console.error("Play failed:", error);
-                });
-            }
-
-            const updatePos = setInterval(() => {
+            audio1.playbackRate = Math.max(0.0625, Math.abs(filteredSpeed));
+            
+            audio1.play();
+            
+            positionUpdateInterval = setInterval(() => {
                 if (!isPlaying || currentSpeed < 0) {
-                    clearInterval(updatePos);
+                    clearInterval(positionUpdateInterval);
+                    positionUpdateInterval = null;
                     return;
                 }
-                currentPosition = audio1.currentTime;
+                if (audio1.readyState >= 2) {
+                    currentPosition = audio1.currentTime;
+                }
             }, 100);
         }
 
         function stopPlayback() {
             isPlaying = false;
             stopBackwardPlayback();
+            if (positionUpdateInterval) {
+                clearInterval(positionUpdateInterval);
+                positionUpdateInterval = null;
+            }
             audio1.pause();
             audio2.pause();
         }
 
         playButton.addEventListener("click", () => {
             initAudioContext();
-            
             if (isPlaying) {
                 stopPlayback();
             } else {
@@ -283,50 +366,27 @@
 
         let speedChangeTimeout;
         let wasNegative = false;
-        
+
         speedSlider.addEventListener("input", () => {
             const prevSpeed = currentSpeed;
-            const prevWasNegative = wasNegative;
             currentSpeed = parseFloat(speedSlider.value);
             speedValue.textContent = currentSpeed.toFixed(2);
-            
+            if (filterAnimationId) {
+                cancelAnimationFrame(filterAnimationId);
+            }
+            updateFilteredSpeed();
             const isNegativeNow = currentSpeed < -0.1;
-            const crossedZero = (prevSpeed >= 0 && currentSpeed < 0) || (prevSpeed < 0 && currentSpeed >= 0);
-
             if (isNegativeNow) {
                 const absSpeed = Math.abs(currentSpeed);
-                jumpSizeInput.value = absSpeed.toFixed(2);
-                chunkLengthInput.value = 1.0;
+                jumpSizeInput.value = 1.0;
                 updateIntervalInput.value = (1000 / absSpeed).toFixed(0);
-                const calculatedSpeed = (1.0 * 1000) / (1000 / absSpeed);
-                reversePlaybackSpeedInput.value = calculatedSpeed.toFixed(2);
-            }
 
-            if (isPlaying && crossedZero) {
-                clearTimeout(speedChangeTimeout);
-                wasNegative = currentSpeed < 0;
-                
-                if (currentSpeed >= 0) {
-                    startForwardPlayback();
-                } else {
-                    currentPosition = audio1.currentTime;
-                    startBackwardPlayback();
-                }
-                return;
-            }
-
-            clearTimeout(speedChangeTimeout);
-            speedChangeTimeout = setTimeout(() => {
-                if (isPlaying) {
-                    if (currentSpeed < 0) {
+                if (isPlaying && prevSpeed < 0) {
+                    clearTimeout(speedChangeTimeout);
+                    speedChangeTimeout = setTimeout(() => {
                         startBackwardPlayback();
-                    }
+                    }, 300);
                 }
-                wasNegative = currentSpeed < 0;
-            }, 300);
-
-            if (isPlaying && currentSpeed >= 0) {
-                audio1.playbackRate = Math.max(0.0625, currentSpeed);
             }
         });
 
