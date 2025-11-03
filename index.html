@@ -56,15 +56,15 @@
     <input type="range" id="filteredSpeedControl" min="-4.0" max="2.0" step="0.01" value="1.0" disabled>
 
     <br><br>
-    <label>Alpha (how fast the slider follows): <input type="number" id="alphaInput" value="0.01" step="0.01" min="0.01" max="1.0"></label>
+    <label>Alpha (how fast the slider follows): <input type="number" id="alphaInput" value="0.005" step="0.01" min="0.01" max="1.0"></label>
 
     <br><br>
     <button id="playButton">Play / Pause</button>
 
     <div class="controls">
-        <label>Segment Duration (length of audio being played) (s): <input type="number" id="chunkLength" value="1" step="0.1" min="0.1"></label><br>
+        <label>Segment Duration (s): <input type="number" id="chunkLength" value="1" step="0.1" min="0.1"></label><br>
         <label>Step (how far back to jump) (s): <input type="number" id="jumpSize" value="0.5" step="0.1" min="0.1"></label><br>
-        <label>Period (how often to jump) (ms): <input type="number" id="updateInterval" value="500" step="50" min="250"></label><br>
+        <label>Period (how often to jump) (ms): <input type="number" id="updateInterval" value="500" step="50" min="50"></label><br>
         <label>Reverse Playback Speed: <input type="number" id="reversePlaybackSpeed" value="1.0" step="0.1" min="0.1" max="2.0"></label>
     </div>
 
@@ -241,56 +241,70 @@
 
         function startBackwardPlayback() {
             if (intervalId) clearInterval(intervalId);
-            let useAudio1 = true;
-            
+
+            const updateInterval = parseInt(updateIntervalInput.value);
             const chunkLength = parseFloat(chunkLengthInput.value);
             const jumpSize = parseFloat(jumpSizeInput.value);
             const playbackSpeed = parseFloat(reversePlaybackSpeedInput.value);
+
+            let useAudio1 = true;
+            let timeout1 = null;
+            let timeout2 = null;
+
+            window.backwardTimeout1 = null;
+            window.backwardTimeout2 = null;
+
             audio1.currentTime = currentPosition;
             audio1.playbackRate = playbackSpeed;
             audio1.play();
             gainNode1.gain.value = 1.0;
             gainNode2.gain.value = 0;
-            
-            const scheduleNext = () => {
+
+            timeout1 = setTimeout(() => {
+                audio1.pause();
+            }, updateInterval + (chunkLength * 1000));
+            window.backwardTimeout1 = timeout1;
+
+            intervalId = setInterval(() => {
                 if (!isPlaying) return;
-                const currentInterval = 1000 / Math.abs(currentSpeed);
+
                 currentPosition = Math.max(0, currentPosition - jumpSize);
-                
+
                 const activeAudio = useAudio1 ? audio2 : audio1;
                 const activeGain = useAudio1 ? gainNode2 : gainNode1;
                 const otherGain = useAudio1 ? gainNode1 : gainNode2;
-                const otherAudio = useAudio1 ? audio1 : audio2;
-                
-                const now = audioContext.currentTime;
-                const fadeTime = 0.2;
-                const chunkDuration = chunkLength / playbackSpeed;
-                activeGain.gain.cancelScheduledValues(now);
-                activeGain.gain.setValueAtTime(0, now);
-                activeGain.gain.linearRampToValueAtTime(1.0, now + fadeTime);
-                activeGain.gain.setValueAtTime(1.0, now + chunkDuration - fadeTime);
-                activeGain.gain.linearRampToValueAtTime(0, now + chunkDuration);
-                
-                otherGain.gain.cancelScheduledValues(now);
-                otherGain.gain.setValueAtTime(otherGain.gain.value, now);
-                otherGain.gain.linearRampToValueAtTime(0, now + fadeTime);
+                const activeTimeout = useAudio1 ? timeout2 : timeout1;
+
+                if (activeTimeout) clearTimeout(activeTimeout);
+
+                activeGain.gain.setValueAtTime(0, audioContext.currentTime);
+                activeGain.gain.linearRampToValueAtTime(1.0, audioContext.currentTime + (updateInterval / 1000));
+
+                otherGain.gain.setValueAtTime(otherGain.gain.value, audioContext.currentTime);
+                otherGain.gain.linearRampToValueAtTime(0, audioContext.currentTime + (updateInterval / 1000));
+
                 activeAudio.currentTime = currentPosition;
                 activeAudio.playbackRate = playbackSpeed;
                 activeAudio.play();
-                setTimeout(() => {
-                    otherAudio.pause();
-                }, fadeTime * 1000);
-                
+
+                const newTimeout = setTimeout(() => {
+                    activeAudio.pause();
+                }, updateInterval + (chunkLength * 1000));
+
+                if (useAudio1) {
+                    timeout2 = newTimeout;
+                    window.backwardTimeout2 = newTimeout;
+                } else {
+                    timeout1 = newTimeout;
+                    window.backwardTimeout1 = newTimeout;
+                }
+
                 useAudio1 = !useAudio1;
-                
+
                 if (currentPosition <= 0) {
                     stopPlayback();
-                } else {
-                    intervalId = setTimeout(scheduleNext, currentInterval);
                 }
-            };
-            const initialInterval = 1000 / Math.abs(currentSpeed);
-            intervalId = setTimeout(scheduleNext, initialInterval);
+            }, updateInterval);
         }
 
         function stopBackwardPlayback() {
@@ -365,7 +379,6 @@
         });
 
         let speedChangeTimeout;
-        let wasNegative = false;
 
         speedSlider.addEventListener("input", () => {
             const prevSpeed = currentSpeed;
