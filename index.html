@@ -117,9 +117,7 @@
                 if (filteredSpeed >= 0) {
                     if (isTransitioning) return;
                     isTransitioning = true;
-                    if (audio1.readyState >= 2 && !audio1.paused) {
-                        currentPosition = audio1.currentTime;
-                    }
+                    
                     stopBackwardPlayback();
                     
                     setTimeout(() => {
@@ -138,8 +136,12 @@
                         gainNode1.gain.value = 1.0;
                         gainNode2.gain.value = 0;
                         audio2.pause();
+                        audio2.currentTime = 0;
+                        
                         audio1.currentTime = currentPosition;
-                        audio1.playbackRate = Math.max(0.0625, Math.abs(filteredSpeed));
+                        const targetRate = Math.max(0.25, Math.abs(currentSpeed > 0 ? currentSpeed : 0.5));
+                        audio1.playbackRate = targetRate;
+                        
                         const playPromise = audio1.play();
                         if (playPromise !== undefined) {
                             playPromise.then(() => {
@@ -150,8 +152,12 @@
                                         positionUpdateInterval = null;
                                         return;
                                     }
-                                    if (audio1.readyState >= 2 && !audio1.paused) {
+                                    if (audio1.readyState >= 2) {
+                                        if (audio1.paused) {
+                                            audio1.play();
+                                        }
                                         currentPosition = audio1.currentTime;
+                                        audio1.playbackRate = Math.max(0.25, Math.abs(filteredSpeed));
                                     }
                                 }, 50);
                             }).catch(error => {
@@ -160,7 +166,7 @@
                         } else {
                             isTransitioning = false;
                         }
-                    }, 100);
+                    }, 50);
                 } else {
                     if (isTransitioning) return;
                     isTransitioning = true;
@@ -181,8 +187,8 @@
                     }, 100);
                 }
             }
-            if (isPlaying && filteredSpeed >= 0) {
-                audio1.playbackRate = Math.max(0.0625, Math.abs(filteredSpeed));
+            if (isPlaying && filteredSpeed >= 0 && !isTransitioning) {
+                audio1.playbackRate = Math.max(0.25, Math.abs(filteredSpeed));
             }
             const diff = Math.abs(filteredSpeed - targetSpeed);
             if (diff > 0.001) {
@@ -192,8 +198,8 @@
                 filteredSpeedValue.textContent = filteredSpeed.toFixed(2);
                 filteredSpeedSlider.value = filteredSpeed;
                 filterAnimationId = null;
-                if (isPlaying && filteredSpeed >= 0) {
-                    audio1.playbackRate = Math.max(0.0625, Math.abs(filteredSpeed));
+                if (isPlaying && filteredSpeed >= 0 && !isTransitioning) {
+                    audio1.playbackRate = Math.max(0.25, Math.abs(filteredSpeed));
                 }
             }
         }
@@ -337,7 +343,7 @@
             audio2.pause();
             audio2.currentTime = 0;
             audio1.currentTime = currentPosition;
-            audio1.playbackRate = Math.max(0.0625, Math.abs(filteredSpeed));
+            audio1.playbackRate = Math.max(0.25, Math.abs(filteredSpeed));
             
             audio1.play();
             
@@ -349,6 +355,7 @@
                 }
                 if (audio1.readyState >= 2) {
                     currentPosition = audio1.currentTime;
+                    audio1.playbackRate = Math.max(0.25, Math.abs(filteredSpeed));
                 }
             }, 100);
         }
