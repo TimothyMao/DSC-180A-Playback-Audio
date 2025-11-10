@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gesture-Controlled Audio Player</title>
+    <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+    <div class="container">
+        <h1>🎵 Gesture-Controlled Audio Player</h1>
+        <p class="subtitle">Rotate your index finger to control playback speed</p>
+        
+        <div class="loading" id="loadingMessage">
+            Loading MediaPipe Hand Detection... Please wait.
+        </div>
+
+        <div id="errorMessage" class="error-message" style="display: none;"></div>
+        
+        <div class="main-content" id="mainContent" style="display: none;">
+            <div class="video-section">
+                <div class="video-container">
+                    <div class="video-wrapper">
+                        <video id="inputVideo" autoplay muted playsinline></video>
+                        <canvas id="outputCanvas"></canvas>
+                        <div class="detection-overlay" id="detectionStatus">
+                            <div id="rotationText">No Rotation</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-label">Direction</div>
+                        <div class="stat-value" id="currentDirection">
+                            <span class="rotation-indicator">⊙</span>
+                        </div>
+                    </div>
+                    
+                    <div class="stat-card">
+                        <div class="stat-label">Rotation Speed</div>
+                        <div class="stat-value" id="speedDisplay">0°/s</div>
+                    </div>
+                    
+                    <div class="stat-card">
+                        <div class="stat-label">Finger Status</div>
+                        <div class="stat-value" id="fingerStatus">❌</div>
+                    </div>
+                    
+                    <div class="stat-card">
+                        <div class="stat-label">Gesture Control</div>
+                        <div class="stat-value clockwise">ON</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="audio-section">
+                <div class="audio-player">
+                    <h2>🎧 Audio Player</h2>
+                    
+                    <div class="file-upload">
+                        <label>Upload Audio File:</label>
+                        <input type="file" id="audioFile" accept="audio/*">
+                    </div>
+
+                    <div class="playback-controls">
+                        <div class="time-display">
+                            <span id="currentTime">0:00</span>
+                            <span id="duration">0:00</span>
+                        </div>
+                        
+                        <input type="range" id="seekBar" min="0" max="100" value="0" step="0.1">
+                        
+                        <button id="playButton">▶️ Play / Pause</button>
+
+                        <div class="control-group">
+                            <div class="control-label">Input Speed (Gesture/Manual)</div>
+                            <input type="range" id="speedControl" min="-4.0" max="2.0" step="0.01" value="1.0">
+                            <div style="text-align: center; font-size: 1.2rem; margin-top: 5px;" id="targetSpeed">1.0x</div>
+                        </div>
+
+                        <div class="control-group">
+                            <div class="control-label">Speed (Smoothed Output)</div>
+                            <input type="range" id="filteredSpeedControl" min="-4.0" max="2.0" step="0.01" value="1.0" disabled>
+                            <div class="speed-display" id="speedValue">1.0x</div>
+                        </div>
+
+                        <div class="advanced-controls">
+                            <label style="display: flex; flex-direction: column; gap: 5px;">
+                                <span style="font-size: 0.85rem;">Smoothing:</span>
+                                <input type="number" id="alphaInput" value="0.05" step="0.01" min="0.01" max="1.0">
+                            </label>
+                            <label style="display: flex; flex-direction: column; gap: 5px;">
+                                <span style="font-size: 0.85rem;">Reverse Speed:</span>
+                                <input type="number" id="reversePlaybackSpeed" value="1.0" step="0.1" min="0.1" max="2.0">
+                            </label>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="info-panel">
+            <h3>📋 How to Use</h3>
+            <ul>
+                <li>🎵 <strong>Upload an audio file</strong> or use the default audio</li>
+                <li>👆 <strong>Point your index finger</strong> toward the camera</li>
+                <li>✋ <strong>Keep other fingers closed</strong> for best detection</li>
+                <li>🔄 <strong>Rotate clockwise</strong> to increase playback speed (green indicator)</li>
+                <li>🔄 <strong>Rotate counter-clockwise</strong> to decrease/reverse speed (red indicator)</li>
+                <li>🎯 <strong>Rotate faster</strong> to change speed more quickly</li>
+                <li>⚡ <strong>Gesture control is always on</strong> - your rotations control the target speed</li>
+                <li>🎚️ <strong>Manual slider</strong> available for precise adjustments or override</li>
+                <li>📊 <strong>Watch the filtered speed slider</strong> - it shows the smoothed playback speed</li>
+            </ul>
+        </div>
+    </div>
+
+    <audio id="audio1" src="./songs-of-the-wind-on-a-southern-shore-and-other-poems-of-florida-003-song-of-the-wind-on-a-southern-shore.4377.mp3" style="display: none;"></audio>
+    <audio id="audio2" src="./songs-of-the-wind-on-a-southern-shore-and-other-poems-of-florida-003-song-of-the-wind-on-a-southern-shore.4377.mp3" style="display: none;"></audio>
+
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+    <script src="script.js"></script>
+</body>
+</html>
