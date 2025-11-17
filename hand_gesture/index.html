@@ -3,126 +3,184 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Gesture-Controlled Audio Player</title>
-    <link rel="stylesheet" href="style.css" />
+    <title>Hand-Controlled Audio Player</title>
+    <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-    <div class="container">
-        <h1>🎵 Gesture-Controlled Audio Player</h1>
-        <p class="subtitle">Rotate your index finger to control playback speed</p>
+    <!-- Main Container with Two-Column Layout -->
+    <div class="main-container">
         
-        <div class="loading" id="loadingMessage">
-            Loading MediaPipe Hand Detection... Please wait.
-        </div>
+        <!-- Left Column: Camera/Hand Recognition -->
+        <div class="left-column">
+            <div class="camera-section">
+                <h1>👆 Hand Control</h1>
+                <p class="subtitle">Control audio with hand gestures</p>
+                
+                <div class="loading" id="loadingMessage">
+                    Loading MediaPipe Hand Detection... Please wait.
+                </div>
 
-        <div id="errorMessage" class="error-message" style="display: none;"></div>
-        
-        <div class="main-content" id="mainContent" style="display: none;">
-            <div class="video-section">
-                <div class="video-container">
-                    <div class="video-wrapper">
-                        <video id="inputVideo" autoplay muted playsinline></video>
-                        <canvas id="outputCanvas"></canvas>
-                        <div class="detection-overlay" id="detectionStatus">
-                            <div id="rotationText">No Rotation</div>
+                <div id="errorMessage" class="error-message" style="display: none;"></div>
+                
+                <!-- Hand Recognition Section -->
+                <div class="hand-section" id="handSection" style="display: none;">
+                    <div class="video-container">
+                        <div class="video-wrapper">
+                            <video id="inputVideo" autoplay muted playsinline></video>
+                            <canvas id="outputCanvas"></canvas>
+                            <div class="detection-overlay" id="detectionStatus">
+                                <div id="rotationText">No Rotation</div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="gesture-status">
+                        <div class="status-card">
+                            <div class="status-label">Current Direction</div>
+                            <div class="status-value" id="currentDirection">
+                                <span>⊙</span>
+                            </div>
+                        </div>
+                        
+                        <div class="status-card">
+                            <div class="status-label">Rotation Angle</div>
+                            <div class="status-value" id="angleDisplay">0°</div>
+                        </div>
+                        
+                        <div class="status-card">
+                            <div class="status-label">Rotation Speed</div>
+                            <div class="status-value" id="speedDisplay">0°/s</div>
+                        </div>
+                        
+                        <div class="status-card">
+                            <div class="status-label">Hand Detected</div>
+                            <div class="status-value" id="fingerStatus">❌</div>
                         </div>
                     </div>
                 </div>
 
-                <div class="stats-grid">
-                    <div class="stat-card">
-                        <div class="stat-label">Direction</div>
-                        <div class="stat-value" id="currentDirection">
-                            <span class="rotation-indicator">⊙</span>
-                        </div>
-                    </div>
-                    
-                    <div class="stat-card">
-                        <div class="stat-label">Rotation Speed</div>
-                        <div class="stat-value" id="speedDisplay">0°/s</div>
-                    </div>
-                    
-                    <div class="stat-card">
-                        <div class="stat-label">Finger Status</div>
-                        <div class="stat-value" id="fingerStatus">❌</div>
-                    </div>
-                    
-                    <div class="stat-card">
-                        <div class="stat-label">Gesture Control</div>
-                        <div class="stat-value clockwise">ON</div>
-                    </div>
+                <!-- Gesture Instructions -->
+                <div class="gesture-instructions">
+                    <h3>🤚 Hand Gesture Controls</h3>
+                    <ul class="gesture-list">
+                        <li><span class="gesture-icon">👆</span> <strong>Point index finger up</strong> to enable gesture control</li>
+                        <li><span class="gesture-icon">↻</span> <strong>Rotate clockwise</strong> for forward playback</li>
+                        <li><span class="gesture-icon">↺</span> <strong>Rotate counter-clockwise</strong> for backward playback</li>
+                        <li><span class="gesture-icon">✋</span> <strong>Open palm</strong> to toggle play/pause</li>
+                    </ul>
                 </div>
             </div>
-
+        </div>
+        
+        <!-- Right Column: Audio Controls -->
+        <div class="right-column">
             <div class="audio-section">
-                <div class="audio-player">
-                    <h2>🎧 Audio Player</h2>
-                    
-                    <div class="file-upload">
-                        <label>Upload Audio File:</label>
-                        <input type="file" id="audioFile" accept="audio/*">
-                    </div>
+                <h2>🎵 Audio Controls</h2>
+                
+                <h3>📁 Load Audio</h3>
+                <div class="upload-section">
+                    <input type="file" id="audioFile" accept="audio/*">
+                    <button id="loadDefaultBtn" class="load-default-btn">Load Default Audio</button>
+                </div>
 
-                    <div class="playback-controls">
+                <!-- Hidden HTML5 audio element for pitch-preserving forward playback -->
+                <audio id="htmlAudioElement" style="display: none;" preload="auto"></audio>
+
+                <div id="controls" style="display: none;">
+                    <div class="time-section">
                         <div class="time-display">
                             <span id="currentTime">0:00</span>
                             <span id="duration">0:00</span>
                         </div>
-                        
                         <input type="range" id="seekBar" min="0" max="100" value="0" step="0.1">
-                        
-                        <button id="playButton">▶️ Play / Pause</button>
+                    </div>
 
-                        <div class="control-group">
-                            <div class="control-label">Input Speed</div>
-                            <input type="range" id="speedControl" min="-4.0" max="2.0" step="0.01" value="1.0">
-                            <div style="text-align: center; font-size: 1.2rem; margin-top: 5px;" id="targetSpeed">1.0x</div>
+                    <div class="speed-section">
+                        <label for="speedBar">Playback Speed: <span id="speedValue">1.00</span>x</label>
+                        <input type="range" id="speedBar" min="-4" max="4" value="1" step="0.01" list="speed-tick-marks">
+                        <datalist id="speed-tick-marks">
+                            <option value="-4"></option>
+                            <option value="-2"></option>
+                            <option value="-1"></option>
+                            <option value="1"></option>
+                            <option value="2"></option>
+                            <option value="4"></option>
+                        </datalist>
+                        <div class="speed-labels">
+                            <span>◄ Backward (-4x)</span>
+                            <span>Forward (4x) ►</span>
                         </div>
 
-                        <div class="control-group">
-                            <div class="control-label">Speed</div>
-                            <input type="range" id="filteredSpeedControl" min="-4.0" max="2.0" step="0.01" value="1.0" disabled>
-                            <div class="speed-display" id="speedValue">1.0x</div>
+                        <div style="margin-top: 15px;">
+                            <label for="filteredSpeedBar">Filtered Speed: <span id="filteredSpeedValue">1.00</span>x</label>
+                            <input type="range" id="filteredSpeedBar" min="-4" max="4" value="1" step="0.01" disabled>
                         </div>
 
-                        <div class="advanced-controls">
-                            <label style="display: flex; flex-direction: column; gap: 5px;">
-                                <span style="font-size: 0.85rem;">Smoothing:</span>
-                                <input type="number" id="alphaInput" value="0.05" step="0.01" min="0.01" max="1.0">
-                            </label>
-                            <label style="display: flex; flex-direction: column; gap: 5px;">
-                                <span style="font-size: 0.85rem;">Reverse Speed:</span>
-                                <input type="number" id="reversePlaybackSpeed" value="1.0" step="0.1" min="0.1" max="2.0">
-                            </label>
+                        <div style="margin-top: 10px;">
+                            <label for="alphaInput">Alpha (smoothing): <span id="alphaValue">0.01</span></label>
+                            <input type="number" id="alphaInput" value="0.01" step="0.01" min="0.001" max="1" style="width: 80px;">
+                            <span class="param-desc">Lower = smoother</span>
                         </div>
+                    </div>
+
+                    <div class="params-section">
+                        <h3>Navigation Parameters <span class="params-info">(updates with speed)</span></h3>
+                        <div class="param-grid">
+                            <div class="param-item">
+                                <label for="segmentDuration">Segment Duration (s)</label>
+                                <input type="number" id="segmentDuration" value="2.0" step="0.1" min="0.5" max="5">
+                                <span class="param-desc">Chunk duration</span>
+                            </div>
+                            <div class="param-item">
+                                <label for="segmentStep">Segment Step (s)</label>
+                                <input type="number" id="segmentStep" value="1.5" step="0.1" min="0.1" max="4">
+                                <span class="param-desc">Distance between chunks</span>
+                            </div>
+                            <div class="param-item">
+                                <label for="segmentInterval">Segment Interval (ms)</label>
+                                <input type="number" id="segmentInterval" value="1200" step="50" min="100" max="3000">
+                                <span class="param-desc">Time between chunks</span>
+                            </div>
+                            <div class="param-item">
+                                <label for="fadeDuration">Fade Duration (s)</label>
+                                <input type="number" id="fadeDuration" value="0.25" step="0.05" min="0" max="1">
+                                <span class="param-desc">Crossfade time</span>
+                            </div>
+                        </div>
+                        <div class="param-info-box">
+                            <strong>Effective Values (at current speed):</strong>
+                            <div class="effective-params">
+                                <span>Step: <strong id="effectiveStep">1.5</strong>s</span>
+                                <span>Interval: <strong id="effectiveInterval">1200</strong>ms</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="button-section">
+                        <button id="playBtn">Play</button>
+                        <button id="pauseBtn" style="display: none;">Pause</button>
+                        <button id="resetBtn">Reset</button>
+                    </div>
+
+                    <div>
+                        <h3>📊 How it works:</h3>
+                        <p>• <strong>Forward (positive speed):</strong> Normal playback with tempo control</p>
+                        <p>• <strong>Backward (negative speed):</strong> Chunk-based navigation</p>
+                        <p>• Speed adjustments preserve pitch in both directions</p>
+                        <p>• Default: 1x forward speed, starting at 0:00</p>
                     </div>
                 </div>
             </div>
         </div>
-        
-        <div class="info-panel">
-            <h3>📋 How to Use</h3>
-            <ul>
-                <li>🎵 <strong>Upload an audio file</strong> or use the default audio</li>
-                <li>👆 <strong>Point your index finger</strong> toward the camera</li>
-                <li>✋ <strong>Keep other fingers closed</strong> for best detection</li>
-                <li>🔄 <strong>Rotate clockwise</strong> to increase playback speed (green indicator)</li>
-                <li>🔄 <strong>Rotate counter-clockwise</strong> to decrease/reverse speed (red indicator)</li>
-                <li>🎯 <strong>Rotate faster</strong> to change speed more quickly</li>
-                <li>⚡ <strong>Gesture control is always on</strong> - your rotations control the target speed</li>
-                <li>🎚️ <strong>Manual slider</strong> available for precise adjustments or override</li>
-                <li>📊 <strong>Watch the filtered speed slider</strong> - it shows the smoothed playback speed</li>
-            </ul>
-        </div>
     </div>
 
-    <audio id="audio1" src="./songs-of-the-wind-on-a-southern-shore-and-other-poems-of-florida-003-song-of-the-wind-on-a-southern-shore.4377.mp3" style="display: none;"></audio>
-    <audio id="audio2" src="./songs-of-the-wind-on-a-southern-shore-and-other-poems-of-florida-003-song-of-the-wind-on-a-southern-shore.4377.mp3" style="display: none;"></audio>
-
+    <!-- Load MediaPipe from CDN -->
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+    <!-- Load our custom script -->
     <script src="script.js"></script>
 </body>
 </html>
