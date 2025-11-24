@@ -615,7 +615,7 @@ loadDefaultBtn.addEventListener('click', async () => {
     audioFileInput.value = '';
 
     try {
-        const audioUrl = './around-the-world-in-80-days-chapter-10.mp3';
+        const audioUrl = 'around-the-world-in-80-days-chapter-10.mp3';
         
         htmlAudioElement.src = audioUrl;
         htmlAudioElement.preservesPitch = true;
