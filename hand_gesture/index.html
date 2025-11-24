@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Hand-Controlled Audio Player</title>
-    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="style.css">
 </head>
 <body>
     <!-- Main Container with Two-Column Layout -->
@@ -59,43 +59,15 @@
                     </div>
                 </div>
 
-                <!-- Control Mode Toggle -->
-                <div class="control-mode-section">
-                    <h3>🎛️ Control Mode</h3>
-                    <div class="mode-toggle">
-                        <label class="toggle-label">
-                            <input type="radio" name="controlMode" value="distance" id="distanceMode" checked>
-                            <span class="radio-custom"></span>
-                            <strong>Distance Mode</strong>
-                            <span class="mode-desc">Rotation controls speed</span>
-                        </label>
-                        <label class="toggle-label">
-                            <input type="radio" name="controlMode" value="speed" id="speedMode">
-                            <span class="radio-custom"></span>
-                            <strong>Speed Mode</strong>
-                            <span class="mode-desc">Fingertip velocity controls speed</span>
-                        </label>
-                    </div>
-                </div>
-
                 <!-- Gesture Instructions -->
                 <div class="gesture-instructions">
                     <h3>🤚 Hand Gesture Controls</h3>
-                    <div id="distanceModeInstructions">
-                        <ul class="gesture-list">
-                            <li><span class="gesture-icon">👆</span> <strong>Point index finger up</strong> to enable gesture control</li>
-                            <li><span class="gesture-icon">↻</span> <strong>Rotate clockwise</strong> for forward playback</li>
-                            <li><span class="gesture-icon">↺</span> <strong>Rotate counter-clockwise</strong> for backward playback</li>
-                        </ul>
-                    </div>
-                    <div id="speedModeInstructions" style="display: none;">
-                        <ul class="gesture-list">
-                            <li><span class="gesture-icon">👆</span> <strong>Point index finger up</strong> to enable gesture control</li>
-                            <li><span class="gesture-icon">→</span> <strong>Move finger right</strong> for forward playback</li>
-                            <li><span class="gesture-icon">←</span> <strong>Move finger left</strong> for backward playback</li>
-                            <li><span class="gesture-icon">⊙</span> <strong>Hold still</strong> to drift to default speed</li>
-                        </ul>
-                    </div>
+                    <ul class="gesture-list">
+                        <li><span class="gesture-icon">👆</span> <strong>Point index finger up</strong> to enable gesture control</li>
+                        <li><span class="gesture-icon">↻</span> <strong>Rotate clockwise</strong> for forward playback</li>
+                        <li><span class="gesture-icon">↺</span> <strong>Rotate counter-clockwise</strong> for backward playback</li>
+                        <li><span class="gesture-icon">✋</span> <strong>Open palm</strong> to toggle play/pause</li>
+                    </ul>
                 </div>
             </div>
         </div>
@@ -124,7 +96,7 @@
                     </div>
 
                     <div class="speed-section">
-                        <label for="speedBar">Input Speed: <span id="speedValue">1.00</span>x</label>
+                        <label for="speedBar">Playback Speed: <span id="speedValue">1.00</span>x</label>
                         <input type="range" id="speedBar" min="-4" max="4" value="1" step="0.01" list="speed-tick-marks">
                         <datalist id="speed-tick-marks">
                             <option value="-4"></option>
@@ -140,50 +112,14 @@
                         </div>
 
                         <div style="margin-top: 15px;">
-                            <label for="filteredSpeedBar">Playback Speed: <span id="filteredSpeedValue">1.00</span>x</label>
+                            <label for="filteredSpeedBar">Filtered Speed: <span id="filteredSpeedValue">1.00</span>x</label>
                             <input type="range" id="filteredSpeedBar" min="-4" max="4" value="1" step="0.01" disabled>
                         </div>
 
-                        <!-- Dynamic Alpha Display and Controls -->
-                        <div class="alpha-section" style="margin-top: 15px; padding: 15px; background: rgba(0, 0, 0, 0.2); border-radius: 8px;">
-                            <h4 style="margin-top: 0;">Smoothing Parameters</h4>
-                            
-                            <div class="alpha-status" style="margin-bottom: 15px; padding: 10px; background: rgba(0, 0, 0, 0.3); border-radius: 5px;">
-                                <div style="display: flex; justify-content: space-between; align-items: center;">
-                                    <span><strong>Active Alpha:</strong></span>
-                                    <span id="activeAlphaDisplay" style="font-size: 1.2em; font-weight: bold; color: #4ade80;">0.0100</span>
-                                </div>
-                                <div style="margin-top: 5px; font-size: 0.9em; color: #aaa;">
-                                    <span id="alphaStateText">Hand detected - Responsive mode</span>
-                                </div>
-                            </div>
-                            
-                            <div style="margin-bottom: 10px;">
-                                <label for="alphaFingerInput">
-                                    Alpha (Finger Detected): 
-                                    <span id="alphaFingerValue" style="font-weight: bold; color: #4ade80;">0.010</span>
-                                </label>
-                                <input type="number" id="alphaFingerInput" value="0.01" step="0.001" min="0.001" max="1" style="width: 80px;">
-                                <span class="param-desc">Responsive tracking</span>
-                            </div>
-                            
-                            <div style="margin-bottom: 10px;">
-                                <label for="alphaNoFingerInput">
-                                    Alpha (No Finger): 
-                                    <span id="alphaNoFingerValue" style="font-weight: bold; color: #f87171;">0.001</span>
-                                </label>
-                                <input type="number" id="alphaNoFingerInput" value="0.001" step="0.0001" min="0.0001" max="1" style="width: 80px;">
-                                <span class="param-desc">Slow drift</span>
-                            </div>
-                            
-                            <div style="margin-top: 10px;">
-                                <label for="driftTargetInput">
-                                    Drift Target Speed: 
-                                    <span id="driftTargetValue" style="font-weight: bold;">0.70</span>x
-                                </label>
-                                <input type="number" id="driftTargetInput" value="0.7" step="0.05" min="0.1" max="2" style="width: 80px;">
-                                <span class="param-desc">Target when idle (positive only)</span>
-                            </div>
+                        <div style="margin-top: 10px;">
+                            <label for="alphaInput">Alpha (smoothing): <span id="alphaValue">0.01</span></label>
+                            <input type="number" id="alphaInput" value="0.01" step="0.01" min="0.001" max="1" style="width: 80px;">
+                            <span class="param-desc">Lower = smoother</span>
                         </div>
                     </div>
 
@@ -228,13 +164,10 @@
 
                     <div>
                         <h3>📊 How it works:</h3>
-                        <p>• <strong>Input Speed:</strong> Controlled by hand gestures (raw input)</p>
-                        <p>• <strong>Playback Speed:</strong> Smoothed speed (what you hear)</p>
-                        <p>• <strong>Alpha (Finger):</strong> Fast response when hand detected</p>
-                        <p>• <strong>Alpha (No Finger):</strong> Slow drift towards target</p>
-                        <p>• <strong>Forward (positive):</strong> Normal playback with tempo control</p>
-                        <p>• <strong>Backward (negative):</strong> Chunk-based navigation</p>
+                        <p>• <strong>Forward (positive speed):</strong> Normal playback with tempo control</p>
+                        <p>• <strong>Backward (negative speed):</strong> Chunk-based navigation</p>
                         <p>• Speed adjustments preserve pitch in both directions</p>
+                        <p>• Default: 1x forward speed, starting at 0:00</p>
                     </div>
                 </div>
             </div>
