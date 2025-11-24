@@ -1,92 +1,152 @@
-const ANGLE_THRESHOLD = 15;
+// ========== HAND RECOGNITION VARIABLES ==========
 const SMOOTHING_WINDOW = 5;
 const SPEED_CALCULATION_FRAMES = 10;
-const ROTATION_SPEED_HISTORY_SIZE = 30;
 
 let hands, camera;
 let previousAngles = [];
 let rotationHistory = [];
 let frameTimestamps = [];
 let currentRotation = 'none';
-let rotationSpeed = 0;
-let rotationSpeedHistory = [];
-let gestureControlEnabled = true;
-let targetSpeedMomentum = 1.0;
+let totalRotation = 0;
+let rotationVelocity = 0;
+let lastGestureTime = 0;
+let gestureCooldown = 1000;
+let lastHandDetectedTime = Date.now();
+let lastActiveRotationTime = Date.now();
+let handDetectionTimeout = 2000;
+let handTimeoutTimer = null;
+let isFingerDetected = false;
 
-const audio1 = document.getElementById("audio1");
-const audio2 = document.getElementById("audio2");
-let audioContext;
-let source1, source2;
-let gainNode1, gainNode2;
-let initialized = false;
-let intervalId = null;
-let currentSpeed = 1.0;
-let filteredSpeed = 1.0;
-let isPlaying = false;
-let currentPosition = 0;
-let filterAnimationId = null;
-let wasNegative = false;
-let speedChangeTimeout;
-let positionUpdateInterval = null;
-let lastFilteredSpeed = 1.0;
-let speedChangeRate = 0;
+// Control mode variables
+let controlMode = 'distance'; // 'distance' or 'speed'
+let velocityHistory = [];
+let fingerVelocity = 0;
 
+// DOM elements for hand recognition
 const videoElement = document.getElementById('inputVideo');
 const canvasElement = document.getElementById('outputCanvas');
 const canvasCtx = canvasElement.getContext('2d');
 const rotationText = document.getElementById('rotationText');
 const currentDirection = document.getElementById('currentDirection');
-const speedDisplayStat = document.getElementById('speedDisplay');
+const angleDisplay = document.getElementById('angleDisplay');
+const speedDisplay = document.getElementById('speedDisplay');
 const fingerStatus = document.getElementById('fingerStatus');
 const detectionStatus = document.getElementById('detectionStatus');
 const loadingMessage = document.getElementById('loadingMessage');
 const errorMessage = document.getElementById('errorMessage');
-const mainContent = document.getElementById('mainContent');
+const handSection = document.getElementById('handSection');
 
-const speedSlider = document.getElementById("speedControl");
-const speedValue = document.getElementById("speedValue");
-const targetSpeedDisplay = document.getElementById("targetSpeed");
-const filteredSpeedSlider = document.getElementById("filteredSpeedControl");
-const alphaInput = document.getElementById("alphaInput");
-const playButton = document.getElementById("playButton");
-const reversePlaybackSpeedInput = document.getElementById("reversePlaybackSpeed");
-const seekBar = document.getElementById("seekBar");
-const currentTimeDisplay = document.getElementById("currentTime");
-const durationDisplay = document.getElementById("duration");
-const audioFileInput = document.getElementById("audioFile");
+// Control mode toggle elements
+const distanceModeRadio = document.getElementById('distanceMode');
+const speedModeRadio = document.getElementById('speedMode');
+const distanceModeInstructions = document.getElementById('distanceModeInstructions');
+const speedModeInstructions = document.getElementById('speedModeInstructions');
 
+// ========== AUDIO PLAYER VARIABLES ==========
+const params = {
+    playback: {
+        clickBoostActive: false,
+        alpha: 0.05,
+        decay: 0.9,
+        clickBoostDecay: 0.999,
+        asymptoticDecay: 0.5,
+        speed: 1.0,
+    },
+    navigation: {
+        segmentDuration: 2.0,
+        segmentStep: 1.5,
+        segmentIntervalMs: 1200,
+        maxActiveSources: 3,
+        fadeDuration: 0.25,
+        minSpeed: -4,
+        maxSpeed: 4,
+    },
+    filtering: {
+        alphaFinger: 0.01,
+        alphaNoFinger: 0.001,
+        driftTarget: 0.7,
+        gestureAmplitude: 1.0,
+    },
+};
+
+// Global variables for audio
+let audioContext;
+let audioBuffer;
+let currentSource = null;
+let isPlaying = false;
+let manuallyPaused = false; // Flag to prevent hand tracking from overriding pause
+let navigationSpeed = 1.0;
+let filteredSpeed = 1.0;
+let gestureTarget = 0.7;
+let filterAnimationFrame = null;
+let startTime = 0;
+let pauseTime = 0;
+let animationFrame = null;
+let scheduleTimeout = null;
+let speedSmoothingHandle = null;
+const speedState = {
+    target: navigationSpeed,
+    current: navigationSpeed,
+    velocity: 0,
+    boost: 0,
+};
+const activeSources = new Set();
+let prevNavigationSpeed = 1.0;
+
+// DOM elements for audio player
+const audioFileInput = document.getElementById('audioFile');
+const htmlAudioElement = document.getElementById('htmlAudioElement');
+const controls = document.getElementById('controls');
+const playBtn = document.getElementById('playBtn');
+const pauseBtn = document.getElementById('pauseBtn');
+const resetBtn = document.getElementById('resetBtn');
+const seekBar = document.getElementById('seekBar');
+const speedBar = document.getElementById('speedBar');
+const speedValue = document.getElementById('speedValue');
+const filteredSpeedBar = document.getElementById('filteredSpeedBar');
+const filteredSpeedValue = document.getElementById('filteredSpeedValue');
+const currentTimeDisplay = document.getElementById('currentTime');
+const durationDisplay = document.getElementById('duration');
+const loadDefaultBtn = document.getElementById('loadDefaultBtn');
+
+// Alpha control elements
+const alphaFingerInput = document.getElementById('alphaFingerInput');
+const alphaFingerValue = document.getElementById('alphaFingerValue');
+const alphaNoFingerInput = document.getElementById('alphaNoFingerInput');
+const alphaNoFingerValue = document.getElementById('alphaNoFingerValue');
+const driftTargetInput = document.getElementById('driftTargetInput');
+const driftTargetValue = document.getElementById('driftTargetValue');
+const activeAlphaDisplay = document.getElementById('activeAlphaDisplay');
+const alphaStateText = document.getElementById('alphaStateText');
+
+// Parameter control elements
+const segmentDurationInput = document.getElementById('segmentDuration');
+const segmentStepInput = document.getElementById('segmentStep');
+const segmentIntervalInput = document.getElementById('segmentInterval');
+const fadeDurationInput = document.getElementById('fadeDuration');
+const effectiveStepDisplay = document.getElementById('effectiveStep');
+const effectiveIntervalDisplay = document.getElementById('effectiveInterval');
+
+const MIN_PLAYBACK_RATE = 0.0625;
+const MAX_PLAYBACK_RATE = 16.0;
+
+// ========== HAND RECOGNITION FUNCTIONS ==========
 function showError(message) {
     errorMessage.textContent = message;
     errorMessage.style.display = 'block';
     loadingMessage.style.display = 'none';
-
+    console.error(message);
 }
 
 function hideLoading() {
     loadingMessage.style.display = 'none';
-    mainContent.style.display = 'grid';
+    handSection.style.display = 'block';
 }
-
-function formatTime(seconds) {
-    const mins = Math.floor(seconds / 60);
-    const secs = Math.floor(seconds % 60);
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
-}
-
-audioFileInput.addEventListener('change', (e) => {
-    const file = e.target.files[0];
-    if (file) {
-        const url = URL.createObjectURL(file);
-        audio1.src = url;
-        audio2.src = url;
-        currentPosition = 0;
-        audio1.load();
-        audio2.load();
-    }
-});
 
 async function initializeHands() {
-    try {                
+    try {
+        console.log("Initializing MediaPipe Hands...");
+        
         if (typeof Hands === 'undefined') {
             throw new Error('MediaPipe Hands library failed to load. Please check your internet connection.');
         }
@@ -106,6 +166,8 @@ async function initializeHands() {
 
         hands.onResults(onResults);
 
+        console.log("MediaPipe Hands initialized, starting camera...");
+
         if (typeof Camera === 'undefined') {
             throw new Error('MediaPipe Camera utility failed to load.');
         }
@@ -119,9 +181,11 @@ async function initializeHands() {
         });
 
         await camera.start();
+        console.log("Camera started successfully!");
         hideLoading();
 
     } catch (error) {
+        console.error('Initialization error:', error);
         showError(`Error: ${error.message}. Please refresh the page and try again.`);
     }
 }
@@ -132,65 +196,98 @@ function onResults(results) {
     
     canvasCtx.save();
     canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+    canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
 
     if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
         const landmarks = results.multiHandLandmarks[0];
         
-        drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, 
+        isFingerDetected = true;
+        lastHandDetectedTime = Date.now();
+        
+        if (handTimeoutTimer) {
+            clearTimeout(handTimeoutTimer);
+            handTimeoutTimer = null;
+        }
+        
+        drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS,
             {color: 'rgba(255, 255, 255, 0.3)', lineWidth: 2});
-        drawLandmarks(canvasCtx, landmarks, 
+        drawLandmarks(canvasCtx, landmarks,
             {color: 'rgba(255, 255, 255, 0.5)', lineWidth: 1, radius: 2});
         
         highlightIndexFinger(landmarks);
-        detectIndexFingerRotation(landmarks);
+
+        // Dispatch to the appropriate control mode
+        if (controlMode === 'distance') {
+            detectIndexFingerRotation(landmarks);
+        } else {
+            detectFingerVelocity(landmarks);
+        }
     } else {
+        isFingerDetected = false;
         fingerStatus.textContent = '❌';
         resetRotationState();
+        
+        setGestureTargetForDrift();
+        
+        if (!filterAnimationFrame) {
+            updateFilteredSpeed();
+        }
+        
+        if (!handTimeoutTimer) {
+            handTimeoutTimer = setTimeout(() => {
+                handTimeoutTimer = null;
+            }, handDetectionTimeout);
+        }
     }
     
     canvasCtx.restore();
 }
 
 function highlightIndexFinger(landmarks) {
-    const indexFingerPoints = [5, 6, 7, 8];
-    
-    for (let i = 0; i < indexFingerPoints.length - 1; i++) {
-        const start = landmarks[indexFingerPoints[i]];
-        const end = landmarks[indexFingerPoints[i + 1]];
-        
-        canvasCtx.beginPath();
-        canvasCtx.strokeStyle = '#00ff00';
-        canvasCtx.lineWidth = 5;
-        canvasCtx.moveTo(start.x * canvasElement.width, start.y * canvasElement.height);
-        canvasCtx.lineTo(end.x * canvasElement.width, end.y * canvasElement.height);
-        canvasCtx.stroke();
-    }
-    
-    indexFingerPoints.forEach((idx) => {
-        const point = landmarks[idx];
-        canvasCtx.beginPath();
-        canvasCtx.fillStyle = '#00ff00';
-        canvasCtx.arc(
-            point.x * canvasElement.width,
-            point.y * canvasElement.height,
-            8,
-            0,
-            2 * Math.PI
-        );
-        canvasCtx.fill();
-    });
+    const indexTip = landmarks[8];
+
+    canvasCtx.beginPath();
+    canvasCtx.fillStyle = '#00ff00';
+    canvasCtx.arc(
+        indexTip.x * canvasElement.width,
+        indexTip.y * canvasElement.height,
+        10,
+        0,
+        2 * Math.PI
+    );
+    canvasCtx.fill();
     
     fingerStatus.textContent = '✅';
 }
 
 function detectIndexFingerRotation(landmarks) {
     const indexTip = landmarks[8];
-    const indexMCP = landmarks[5];
-    const wrist = landmarks[0];
+    const currentPos = { x: indexTip.x, y: indexTip.y };
     
-    const angle = calculateAngle(wrist, indexMCP, indexTip);
+    const MIN_MOVEMENT = 0.015;
     
-    previousAngles.push(angle);
+    if (previousAngles.length > 0) {
+        const lastPos = previousAngles[previousAngles.length - 1];
+        const dx = currentPos.x - lastPos.x;
+        const dy = currentPos.y - lastPos.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        
+        if (distance < MIN_MOVEMENT) {
+            // Hand detected but not moving - keep input stable, let filtered catch up
+            if (!manuallyPaused) {
+                gestureTarget = navigationSpeed;
+            }
+            // Reset rotation speed display to 0
+            speedDisplay.textContent = '0°/s';
+            rotationVelocity = 0;
+            if (!filterAnimationFrame && !manuallyPaused) {
+                updateFilteredSpeed();
+            }
+            return;
+        }
+    }
+    
+    previousAngles.push(currentPos);
     frameTimestamps.push(Date.now());
     
     if (previousAngles.length > SMOOTHING_WINDOW) {
@@ -198,383 +295,904 @@ function detectIndexFingerRotation(landmarks) {
         frameTimestamps.shift();
     }
     
-    if (previousAngles.length >= 2) {
-        const angleDiff = calculateAngleDifference(
-            previousAngles[previousAngles.length - 2],
-            previousAngles[previousAngles.length - 1]
-        );
+    if (previousAngles.length < 3) return;
+    
+    let totalAngularVelocity = 0;
+    let validSamples = 0;
+    
+    for (let i = 2; i < previousAngles.length; i++) {
+        const p0 = previousAngles[i - 2];
+        const p1 = previousAngles[i - 1];
+        const p2 = previousAngles[i];
         
-        rotationHistory.push(angleDiff);
-        if (rotationHistory.length > SPEED_CALCULATION_FRAMES) {
-            rotationHistory.shift();
+        const v1x = p1.x - p0.x;
+        const v1y = p1.y - p0.y;
+        const v2x = p2.x - p1.x;
+        const v2y = p2.y - p1.y;
+        
+        const crossProduct = v1x * v2y - v1y * v2x;
+        
+        const mag1 = Math.sqrt(v1x * v1x + v1y * v1y);
+        const mag2 = Math.sqrt(v2x * v2x + v2y * v2y);
+        
+        if (mag1 > 0.01 && mag2 > 0.01) {
+            const angularChange = crossProduct / (mag1 * mag2);
+            totalAngularVelocity += angularChange;
+            validSamples++;
         }
+    }
+    
+    if (validSamples === 0) {
+        speedDisplay.textContent = '0°/s';
+        rotationVelocity = 0;
+        setGestureTargetForDrift();
+        if (!filterAnimationFrame) {
+            updateFilteredSpeed();
+        }
+        return;
+    }
+    
+    const avgAngularVelocity = totalAngularVelocity / validSamples;
+    
+    rotationHistory.push(avgAngularVelocity);
+    if (rotationHistory.length > SPEED_CALCULATION_FRAMES) {
+        rotationHistory.shift();
+    }
+    
+    if (frameTimestamps.length >= 2) {
+        const timeDiff = (frameTimestamps[frameTimestamps.length - 1] - 
+                        frameTimestamps[0]) / 1000;
         
-        if (frameTimestamps.length >= 2) {
-            const timeDiff = (frameTimestamps[frameTimestamps.length - 1] - 
-                            frameTimestamps[0]) / 1000;
-            const totalAngleChange = rotationHistory.reduce((sum, val) => sum + val, 0);
-            const instantSpeed = totalAngleChange / timeDiff;
-
-            rotationSpeedHistory.push(instantSpeed);
-            if (rotationSpeedHistory.length > ROTATION_SPEED_HISTORY_SIZE) {
-                rotationSpeedHistory.shift();
-            }
-
-            let weightedSum = 0;
-            let weightTotal = 0;
-            for (let i = 0; i < rotationSpeedHistory.length; i++) {
-                const weight = i + 1;
-                weightedSum += rotationSpeedHistory[i] * weight;
-                weightTotal += weight;
-            }
-            rotationSpeed = weightedSum / weightTotal;
+        if (timeDiff > 0) {
+            // avgAngularVelocity is already the current frame's angular change
+            // Just scale it for display as degrees per second
+            const frameDuration = timeDiff / (frameTimestamps.length - 1);
+            rotationVelocity = avgAngularVelocity / frameDuration;
             
-            speedDisplayStat.textContent = `${Math.round(Math.abs(rotationSpeed))}°/s`;
-        }
-        
-        if (Math.abs(angleDiff) > ANGLE_THRESHOLD) {
-            if (angleDiff > 0) {
-                setRotation('counterclockwise');
+            const VELOCITY_SCALE = 1000;
+            const displaySpeed = Math.abs(rotationVelocity) * VELOCITY_SCALE;
+            speedDisplay.textContent = `${Math.round(displaySpeed)}°/s`;
+            
+            totalRotation += avgAngularVelocity * 180 / Math.PI;
+            angleDisplay.textContent = `${Math.round(totalRotation)}°`;
+            
+            if (Math.abs(rotationVelocity) > 0.12) {
+                lastActiveRotationTime = Date.now();
+                if (rotationVelocity < 0) {
+                    setRotation('clockwise');
+                    setGestureTargetFromRotation(1);
+                } else {
+                    setRotation('counterclockwise');
+                    setGestureTargetFromRotation(-1);
+                }
+                
+                if (!filterAnimationFrame) {
+                    updateFilteredSpeed();
+                }
             } else {
-                setRotation('clockwise');
-            }
-        } else {
-            const trend = rotationHistory.slice(-5).reduce((sum, val) => sum + val, 0);
-            if (Math.abs(trend) > ANGLE_THRESHOLD) {
-                setRotation(trend > 0 ? 'counterclockwise' : 'clockwise');
+                // Rotation is very small but hand is still detected - keep input stable, let filtered catch up
+                if (!manuallyPaused) {
+                    gestureTarget = navigationSpeed;
+                }
+                speedDisplay.textContent = '0°/s';
+                rotationVelocity = 0;
+                if (!filterAnimationFrame && !manuallyPaused) {
+                    updateFilteredSpeed();
+                }
             }
         }
-
-        updateSpeedFromGesture();
+    }
+    
+    const recentTrend = rotationHistory.slice(-5).reduce((sum, val) => sum + val, 0);
+    const DIRECTION_THRESHOLD = 0.08;
+    
+    if (Math.abs(recentTrend) > DIRECTION_THRESHOLD) {
+        if (recentTrend > 0) {
+            setRotation('counterclockwise');
+        } else {
+            setRotation('clockwise');
+        }
     }
 }
 
-function calculateAngle(p1, p2, p3) {
-    const angle = Math.atan2(p3.y - p2.y, p3.x - p2.x) * 180 / Math.PI;
-    return angle;
+function setGestureTargetFromRotation(direction) {
+    // Don't update speed if manually paused
+    if (manuallyPaused) return;
+
+    const speedIncrement = 0.05;
+    const maxSpeed = params.navigation.maxSpeed;
+    const minSpeed = params.navigation.minSpeed;
+
+    if (direction > 0) {
+        navigationSpeed = Math.min(navigationSpeed + speedIncrement, maxSpeed);
+    } else {
+        navigationSpeed = Math.max(navigationSpeed - speedIncrement, minSpeed);
+    }
+
+    speedBar.value = navigationSpeed;
+    speedValue.textContent = navigationSpeed.toFixed(2);
+
+    gestureTarget = navigationSpeed;
 }
 
-function calculateAngleDifference(angle1, angle2) {
-    let diff = angle2 - angle1;
-    while (diff > 180) diff -= 360;
-    while (diff < -180) diff += 360;
-    return diff;
+function setGestureTargetForDrift() {
+    // Don't update speed if manually paused
+    if (manuallyPaused) return;
+
+    if (filteredSpeed > 0) {
+        // Set drift target - navigationSpeed will gradually follow filteredSpeed
+        gestureTarget = params.filtering.driftTarget;
+    } else {
+        // For negative speeds, maintain current speed (no drift)
+        gestureTarget = filteredSpeed;
+    }
+
+    // Update navigationSpeed to follow filteredSpeed (the smoothed output)
+    // This makes the input slider track the actual playback speed
+    navigationSpeed = filteredSpeed;
+    speedBar.value = navigationSpeed;
+    speedValue.textContent = navigationSpeed.toFixed(2);
+}
+
+// ========== SPEED MODE: Fingertip Velocity Detection ==========
+function detectFingerVelocity(landmarks) {
+    const indexTip = landmarks[8];
+    const currentPos = { x: indexTip.x, y: indexTip.y };
+    const currentTime = Date.now();
+
+    // Store position history
+    previousAngles.push(currentPos);
+    frameTimestamps.push(currentTime);
+
+    // Keep only recent history
+    if (previousAngles.length > SMOOTHING_WINDOW) {
+        previousAngles.shift();
+        frameTimestamps.shift();
+    }
+
+    // Need at least 2 frames to calculate velocity
+    if (previousAngles.length < 2) return;
+
+    // Calculate horizontal velocity (x-direction)
+    const firstPos = previousAngles[0];
+    const lastPos = previousAngles[previousAngles.length - 1];
+    const timeDiff = (frameTimestamps[frameTimestamps.length - 1] - frameTimestamps[0]) / 1000; // in seconds
+
+    if (timeDiff === 0) return;
+
+    // Calculate x-velocity (positive = right, negative = left)
+    const dx = lastPos.x - firstPos.x;
+    fingerVelocity = dx / timeDiff;
+
+    // Store velocity history for smoothing
+    velocityHistory.push(fingerVelocity);
+    if (velocityHistory.length > SPEED_CALCULATION_FRAMES) {
+        velocityHistory.shift();
+    }
+
+    // Calculate average velocity
+    const avgVelocity = velocityHistory.reduce((sum, v) => sum + v, 0) / velocityHistory.length;
+
+    // Display velocity as "speed"
+    const displaySpeed = Math.abs(avgVelocity) * 1000; // Scale for display
+    speedDisplay.textContent = `${Math.round(displaySpeed)}°/s`;
+
+    // Map velocity to audio speed
+    // Velocity threshold to consider as "moving"
+    const MIN_VELOCITY = 0.02;
+
+    if (Math.abs(avgVelocity) < MIN_VELOCITY) {
+        // Hand is stationary - drift to default speed
+        if (!manuallyPaused) {
+            setGestureTargetForDrift();
+        }
+
+        // Update direction display
+        rotationText.textContent = 'Hold Still';
+        detectionStatus.style.background = 'rgba(100, 100, 100, 0.7)';
+        currentDirection.innerHTML = '<span>⊙</span>';
+
+        if (!filterAnimationFrame && !manuallyPaused) {
+            updateFilteredSpeed();
+        }
+    } else {
+        // Hand is moving - map velocity to speed
+        if (!manuallyPaused) {
+            setGestureTargetFromVelocity(avgVelocity);
+        }
+
+        // Update direction display
+        if (avgVelocity > 0) {
+            rotationText.textContent = '→ Moving Right';
+            detectionStatus.style.background = 'rgba(74, 222, 128, 0.7)';
+            currentDirection.innerHTML = '<span style="color: #4ade80;">→</span>';
+        } else {
+            rotationText.textContent = '← Moving Left';
+            detectionStatus.style.background = 'rgba(248, 113, 113, 0.7)';
+            currentDirection.innerHTML = '<span style="color: #f87171;">←</span>';
+        }
+
+        if (!filterAnimationFrame && !manuallyPaused) {
+            updateFilteredSpeed();
+        }
+    }
+}
+
+function setGestureTargetFromVelocity(velocity) {
+    // Don't update speed if manually paused
+    if (manuallyPaused) return;
+
+    // Map velocity to speed range
+    // Velocity is typically in range [-1, 1] for normalized screen coordinates
+    // Scale it to our speed range [-4, 4]
+    const VELOCITY_SCALE = 3; // Reduced sensitivity - requires faster movement to reach max speed
+    const maxSpeed = params.navigation.maxSpeed;
+    const minSpeed = params.navigation.minSpeed;
+
+    // Direct mapping: velocity -> speed
+    const targetSpeed = velocity * VELOCITY_SCALE;
+    navigationSpeed = clamp(targetSpeed, minSpeed, maxSpeed);
+
+    speedBar.value = navigationSpeed;
+    speedValue.textContent = navigationSpeed.toFixed(2);
+
+    gestureTarget = navigationSpeed;
 }
 
 function setRotation(direction) {
     if (currentRotation === direction) return;
-    
+
     currentRotation = direction;
-    
+
     if (direction === 'clockwise') {
         rotationText.textContent = '↻ Clockwise';
         detectionStatus.style.background = 'rgba(74, 222, 128, 0.7)';
-        currentDirection.innerHTML = '<span class="rotation-indicator arrow-cw clockwise">↻</span>';
-        currentDirection.classList.add('clockwise');
-        currentDirection.classList.remove('counterclockwise');
+        currentDirection.innerHTML = '<span style="color: #4ade80;">↻</span>';
     } else if (direction === 'counterclockwise') {
         rotationText.textContent = '↺ Counter-clockwise';
         detectionStatus.style.background = 'rgba(248, 113, 113, 0.7)';
-        currentDirection.innerHTML = '<span class="rotation-indicator arrow-ccw counterclockwise">↺</span>';
-        currentDirection.classList.add('counterclockwise');
-        currentDirection.classList.remove('clockwise');
+        currentDirection.innerHTML = '<span style="color: #f87171;">↺</span>';
     }
 }
 
 function resetRotationState() {
     currentRotation = 'none';
-    rotationText.textContent = 'No Rotation';
+    rotationText.textContent = controlMode === 'distance' ? 'No Rotation' : 'Hold Still';
     detectionStatus.style.background = 'rgba(0, 0, 0, 0.7)';
-    currentDirection.innerHTML = '<span class="rotation-indicator">⊙</span>';
-    currentDirection.classList.remove('clockwise', 'counterclockwise');
+    currentDirection.innerHTML = '<span>⊙</span>';
     previousAngles = [];
     rotationHistory = [];
+    velocityHistory = [];
     frameTimestamps = [];
-    rotationSpeed = 0;
-    rotationSpeedHistory = [];
-    speedDisplayStat.textContent = '0°/s';
+    totalRotation = 0;
+    rotationVelocity = 0;
+    fingerVelocity = 0;
+    angleDisplay.textContent = '0°';
+    speedDisplay.textContent = '0°/s';
 }
 
-function updateSpeedFromGesture() {
-    
-    const maxRotationSpeed = 800;
-    const speedRange = 6;
-    const targetSpeedSmoothing = 0.03;
-    const rotationDeadzone = 50;
+// ========== AUDIO PLAYER FUNCTIONS ==========
+audioContext = new (window.AudioContext || window.webkitAudioContext)();
 
-    if (Math.abs(rotationSpeed) < rotationDeadzone) {
-        currentSpeed = targetSpeedMomentum;
-        speedSlider.value = currentSpeed;
-        targetSpeedDisplay.textContent = currentSpeed.toFixed(2) + 'x';
+speedBar.min = params.navigation.minSpeed;
+speedBar.max = params.navigation.maxSpeed;
+speedBar.value = navigationSpeed;
+speedValue.textContent = navigationSpeed.toFixed(2);
+
+segmentDurationInput.value = params.navigation.segmentDuration;
+segmentStepInput.value = params.navigation.segmentStep;
+segmentIntervalInput.value = params.navigation.segmentIntervalMs;
+fadeDurationInput.value = params.navigation.fadeDuration;
+updateEffectiveParams();
+
+audioFileInput.addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    stopPlayback();
+
+    const arrayBuffer = await file.arrayBuffer();
+    audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+
+    const fileURL = URL.createObjectURL(file);
+    htmlAudioElement.src = fileURL;
+    htmlAudioElement.preservesPitch = true;
+    htmlAudioElement.mozPreservesPitch = true;
+    htmlAudioElement.webkitPreservesPitch = true;
+
+    seekBar.max = audioBuffer.duration;
+    seekBar.value = 0;
+    pauseTime = 0;
+
+    durationDisplay.textContent = formatTime(audioBuffer.duration);
+    currentTimeDisplay.textContent = formatTime(0);
+
+    controls.style.display = 'block';
+});
+
+loadDefaultBtn.addEventListener('click', async () => {
+    stopPlayback();
+    audioFileInput.value = '';
+
+    try {
+        const audioUrl = './around-the-world-in-80-days-chapter-10.mp3';
+        
+        htmlAudioElement.src = audioUrl;
+        htmlAudioElement.preservesPitch = true;
+        htmlAudioElement.mozPreservesPitch = true;
+        htmlAudioElement.webkitPreservesPitch = true;
+
+        await new Promise((resolve, reject) => {
+            htmlAudioElement.onloadedmetadata = resolve;
+            htmlAudioElement.onerror = reject;
+        });
+
+        const response = await fetch(audioUrl);
+        const arrayBuffer = await response.arrayBuffer();
+        audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+
+        seekBar.max = audioBuffer.duration;
+        seekBar.value = 0;
+        pauseTime = 0;
+
+        durationDisplay.textContent = formatTime(audioBuffer.duration);
+        currentTimeDisplay.textContent = formatTime(0);
+
+        controls.style.display = 'block';
+        stopPlayback();
+    } catch (error) {
+        console.error('Error loading default audio:', error);
+        alert('Failed to load default audio file. Make sure "around-the-world-in-80-days-chapter-10.mp3" is in the same folder as your HTML file.');
+    }
+});
+
+speedBar.addEventListener('input', (e) => {
+    let newSpeed = clamp(parseFloat(e.target.value), params.navigation.minSpeed, params.navigation.maxSpeed);
+
+    navigationSpeed = newSpeed;
+    speedValue.textContent = newSpeed.toFixed(2);
+
+    gestureTarget = newSpeed;
+
+    // Clear manual pause when user manually adjusts speed
+    manuallyPaused = false;
+
+    if (!filterAnimationFrame) {
+        updateFilteredSpeed();
+    }
+});
+
+alphaFingerInput.addEventListener('input', (e) => {
+    const value = parseFloat(e.target.value);
+    if (!isNaN(value)) {
+        params.filtering.alphaFinger = clamp(value, 0.001, 1);
+        alphaFingerValue.textContent = params.filtering.alphaFinger.toFixed(3);
+        updateAlphaDisplay();
+    }
+});
+
+alphaNoFingerInput.addEventListener('input', (e) => {
+    const value = parseFloat(e.target.value);
+    if (!isNaN(value)) {
+        params.filtering.alphaNoFinger = clamp(value, 0.0001, 1);
+        alphaNoFingerValue.textContent = params.filtering.alphaNoFinger.toFixed(4);
+        updateAlphaDisplay();
+    }
+});
+
+driftTargetInput.addEventListener('input', (e) => {
+    const value = parseFloat(e.target.value);
+    // Only update if value is valid (not NaN)
+    if (!isNaN(value)) {
+        params.filtering.driftTarget = clamp(value, 0.1, 4);
+        driftTargetValue.textContent = params.filtering.driftTarget.toFixed(2);
+    }
+    // If NaN (empty field), keep the previous valid value
+});
+
+function updateAlphaDisplay() {
+    const currentAlpha = isFingerDetected ? params.filtering.alphaFinger : params.filtering.alphaNoFinger;
+    // Show 4 decimal places for very small values, 3 for larger ones
+    const decimals = currentAlpha < 0.001 ? 4 : 3;
+    activeAlphaDisplay.textContent = currentAlpha.toFixed(decimals);
+    
+    if (isFingerDetected) {
+        activeAlphaDisplay.style.color = '#4ade80';
+        alphaStateText.textContent = 'Hand detected - Responsive mode';
+        alphaStateText.style.color = '#4ade80';
+    } else {
+        activeAlphaDisplay.style.color = '#f87171';
+        alphaStateText.textContent = 'Drifting - Slow mode';
+        alphaStateText.style.color = '#f87171';
+    }
+}
+
+function updateEffectiveParams() {
+    const speed = Math.abs(filteredSpeed);
+    const effectiveStep = params.navigation.segmentStep * speed;
+    const effectiveInterval = (params.navigation.segmentIntervalMs / 1000) / speed;
+
+    effectiveStepDisplay.textContent = effectiveStep.toFixed(2);
+    effectiveIntervalDisplay.textContent = (effectiveInterval * 1000).toFixed(0);
+}
+
+segmentDurationInput.addEventListener('input', (e) => {
+    const value = parseFloat(e.target.value);
+    if (!isNaN(value)) {
+        params.navigation.segmentDuration = value;
+        updateEffectiveParams();
+    }
+});
+
+segmentStepInput.addEventListener('input', (e) => {
+    const value = parseFloat(e.target.value);
+    if (!isNaN(value)) {
+        params.navigation.segmentStep = value;
+        updateEffectiveParams();
+    }
+});
+
+segmentIntervalInput.addEventListener('input', (e) => {
+    const value = parseFloat(e.target.value);
+    if (!isNaN(value)) {
+        params.navigation.segmentIntervalMs = value;
+        updateEffectiveParams();
+    }
+});
+
+fadeDurationInput.addEventListener('input', (e) => {
+    const value = parseFloat(e.target.value);
+    if (!isNaN(value)) {
+        params.navigation.fadeDuration = value;
+    }
+});
+
+function updateFilteredSpeed() {
+    // Don't apply speed changes if manually paused
+    if (manuallyPaused) {
+        if (filterAnimationFrame) {
+            cancelAnimationFrame(filterAnimationFrame);
+            filterAnimationFrame = null;
+        }
         return;
     }
 
-    const normalizedSpeed = Math.max(-maxRotationSpeed, Math.min(maxRotationSpeed, rotationSpeed));
-    const gestureIndicatedSpeed = -(normalizedSpeed / maxRotationSpeed) * speedRange;
+    const alpha = isFingerDetected ? params.filtering.alphaFinger : params.filtering.alphaNoFinger;
 
-    targetSpeedMomentum += (gestureIndicatedSpeed - targetSpeedMomentum) * targetSpeedSmoothing;
+    updateAlphaDisplay();
 
-    const newSpeed = Math.max(-4.0, Math.min(2.0, targetSpeedMomentum));
-    
-    currentSpeed = newSpeed;
-    speedSlider.value = newSpeed;
-    targetSpeedDisplay.textContent = newSpeed.toFixed(2) + 'x';
-    
-    if (filterAnimationId) {
-        cancelAnimationFrame(filterAnimationId);
-    }
-    updateFilteredSpeed();
-}
+    const oldFilteredSpeed = filteredSpeed;
+    filteredSpeed = filteredSpeed - alpha * (filteredSpeed - gestureTarget);
 
-function updateFilteredSpeed() {
-    const alpha = parseFloat(alphaInput.value);
-    const targetSpeed = currentSpeed;
-    const prevFilteredSpeed = filteredSpeed;
-    filteredSpeed = filteredSpeed - alpha * (filteredSpeed - targetSpeed);
-    speedValue.textContent = filteredSpeed.toFixed(2) + 'x';
-    filteredSpeedSlider.value = filteredSpeed;
+    filteredSpeedValue.textContent = filteredSpeed.toFixed(2);
+    filteredSpeedBar.value = filteredSpeed;
 
-    speedChangeRate = Math.abs(filteredSpeed - lastFilteredSpeed);
-    lastFilteredSpeed = filteredSpeed;
+    const oldDirection = Math.sign(oldFilteredSpeed);
+    const newDirection = Math.sign(filteredSpeed);
 
-    const crossedZero = (prevFilteredSpeed >= 0 && filteredSpeed < 0) || (prevFilteredSpeed < 0 && filteredSpeed >= 0);
+    const targetDirection = Math.sign(gestureTarget);
+    const aboutToCrossZero = (oldDirection !== 0 && targetDirection !== 0 &&
+                              oldDirection !== targetDirection &&
+                              Math.abs(filteredSpeed) < 0.2);
 
-    if (isPlaying && crossedZero) {
-        clearTimeout(speedChangeTimeout);
-        wasNegative = filteredSpeed < 0;
+    const crossedZero = (oldDirection !== 0 && newDirection !== 0 && oldDirection !== newDirection);
 
-        if (filteredSpeed >= 0) {
-            startForwardPlayback();
-        } else {
-            currentPosition = audio1.currentTime || currentPosition;
-            startBackwardPlayback();
-        }
-    } else if (isPlaying && filteredSpeed < 0) {
-        if (speedChangeRate < 0.05 && intervalId) {
-            clearTimeout(speedChangeTimeout);
-            speedChangeTimeout = setTimeout(() => {
-                if (isPlaying && filteredSpeed < 0) {
-                    startBackwardPlayback();
+    if ((aboutToCrossZero || crossedZero) && isPlaying) {
+        const currentPos = parseFloat(seekBar.value);
+        pauseTime = currentPos;
+        
+        const shouldBeReverse = targetDirection < 0;
+        const currentlyReverse = oldFilteredSpeed < 0;
+        
+        if (shouldBeReverse !== currentlyReverse) {
+            if (currentlyReverse) {
+                activeSources.forEach((source) => {
+                    try { source.stop(); } catch (e) {}
+                });
+                activeSources.clear();
+                if (scheduleTimeout) {
+                    clearTimeout(scheduleTimeout);
+                    scheduleTimeout = null;
                 }
-                wasNegative = filteredSpeed < 0;
-            }, 20);
-        } else if (!intervalId) {
-            startBackwardPlayback();
+                filteredSpeed = Math.max(0.15, Math.abs(filteredSpeed));
+                prevNavigationSpeed = filteredSpeed;
+                playForwardNormal(pauseTime);
+            } else {
+                htmlAudioElement.pause();
+                filteredSpeed = -Math.max(0.15, Math.abs(filteredSpeed));
+                prevNavigationSpeed = filteredSpeed;
+                playReverseChunk(pauseTime);
+            }
         }
-    } else if (isPlaying && filteredSpeed >= 0) {
-        audio1.playbackRate = Math.max(0.0625, filteredSpeed);
+    } else if (isPlaying) {
+        applyFilteredSpeed();
     }
 
-    const diff = Math.abs(filteredSpeed - targetSpeed);
+    const diff = Math.abs(gestureTarget - filteredSpeed);
     if (diff > 0.001) {
-        filterAnimationId = requestAnimationFrame(updateFilteredSpeed);
+        filterAnimationFrame = requestAnimationFrame(updateFilteredSpeed);
     } else {
-        filteredSpeed = targetSpeed;
-        speedValue.textContent = filteredSpeed.toFixed(2) + 'x';
-        filteredSpeedSlider.value = filteredSpeed;
-        filterAnimationId = null;
+        filteredSpeed = gestureTarget;
+        filteredSpeedValue.textContent = filteredSpeed.toFixed(2);
+        filteredSpeedBar.value = filteredSpeed;
+        if (isPlaying) {
+            applyFilteredSpeed();
+        }
+        filterAnimationFrame = null;
     }
 }
 
-audio1.addEventListener("loadedmetadata", () => {
-    seekBar.max = audio1.duration;
-    durationDisplay.textContent = formatTime(audio1.duration);
-});
+function applyFilteredSpeed() {
+    if (!isPlaying) return;
 
-setInterval(() => {
+    if (filteredSpeed > 0 && htmlAudioElement && !htmlAudioElement.paused) {
+        const targetPlaybackRate = Math.abs(filteredSpeed);
+        const safePlaybackRate = clamp(targetPlaybackRate, MIN_PLAYBACK_RATE, MAX_PLAYBACK_RATE);
+        htmlAudioElement.playbackRate = safePlaybackRate;
+    }
+
+    updateEffectiveParams();
+}
+
+seekBar.addEventListener('input', (e) => {
+    const newTime = parseFloat(e.target.value);
+    pauseTime = newTime;
+    currentTimeDisplay.textContent = formatTime(newTime);
+    
     if (isPlaying) {
-        currentTimeDisplay.textContent = formatTime(currentPosition);
-        seekBar.value = currentPosition;
-    }
-}, 100);
-
-seekBar.addEventListener("input", () => {
-    currentPosition = parseFloat(seekBar.value);
-    currentTimeDisplay.textContent = formatTime(currentPosition);
-    if (filteredSpeed >= 0) {
-        audio1.currentTime = currentPosition;
-        audio2.currentTime = currentPosition;
+        stopPlayback();
+        setTimeout(() => startPlayback(), 100);
     }
 });
 
-function initAudioContext() {
-    if (!initialized) {
-        audioContext = new AudioContext();
-        source1 = audioContext.createMediaElementSource(audio1);
-        source2 = audioContext.createMediaElementSource(audio2);
-        gainNode1 = audioContext.createGain();
-        gainNode2 = audioContext.createGain();
-        source1.connect(gainNode1);
-        source2.connect(gainNode2);
-        gainNode1.connect(audioContext.destination);
-        gainNode2.connect(audioContext.destination);
-        gainNode1.gain.value = 1.0;
-        gainNode2.gain.value = 1.0;
-        initialized = true;
+playBtn.addEventListener('click', startPlayback);
+pauseBtn.addEventListener('click', pausePlayback);
+
+resetBtn.addEventListener('click', () => {
+    stopPlayback();
+    // Clear manual pause on reset
+    manuallyPaused = false;
+
+    if (navigationSpeed < 0) {
+        pauseTime = audioBuffer.duration;
+        seekBar.value = audioBuffer.duration;
+        currentTimeDisplay.textContent = formatTime(audioBuffer.duration);
+    } else {
+        pauseTime = 0;
+        seekBar.value = 0;
+        currentTimeDisplay.textContent = formatTime(0);
     }
-}
+});
 
-function startBackwardPlayback() {
-    if (intervalId) clearInterval(intervalId);
+function playForwardNormal(startPosition) {
+    if (!audioBuffer || !isPlaying) return;
 
-    const absSpeed = Math.abs(filteredSpeed);
-    const chunkLength = 1.0;
-    const jumpSize = 1.0;
-    const updateInterval = Math.max(50, 1000 / absSpeed);
-    const playbackSpeed = parseFloat(reversePlaybackSpeedInput.value);
-    const windowDuration = 0.02;
+    htmlAudioElement.currentTime = startPosition;
+    htmlAudioElement.playbackRate = Math.abs(filteredSpeed);
+    htmlAudioElement.play();
 
-    let useAudio1 = true;
-    let timeout1 = null;
-    let timeout2 = null;
-
-    window.backwardTimeout1 = null;
-    window.backwardTimeout2 = null;
-
-    audio1.currentTime = currentPosition;
-    audio1.playbackRate = playbackSpeed;
-    gainNode1.gain.setValueAtTime(0, audioContext.currentTime);
-    gainNode1.gain.linearRampToValueAtTime(1.0, audioContext.currentTime + windowDuration);
-    audio1.play();
-    gainNode2.gain.value = 0;
-
-    timeout1 = setTimeout(() => {
-        gainNode1.gain.setValueAtTime(1.0, audioContext.currentTime);
-        gainNode1.gain.linearRampToValueAtTime(0, audioContext.currentTime + windowDuration);
-        setTimeout(() => audio1.pause(), windowDuration * 1000);
-    }, (chunkLength - windowDuration) * 1000);
-    window.backwardTimeout1 = timeout1;
-
-    intervalId = setInterval(() => {
-        if (!isPlaying) return;
-
-        currentPosition = Math.max(0, currentPosition - jumpSize);
-
-        const activeAudio = useAudio1 ? audio2 : audio1;
-        const activeGain = useAudio1 ? gainNode2 : gainNode1;
-        const activeTimeout = useAudio1 ? timeout2 : timeout1;
-
-        if (activeTimeout) clearTimeout(activeTimeout);
-
-        activeGain.gain.setValueAtTime(0, audioContext.currentTime);
-        activeGain.gain.linearRampToValueAtTime(1.0, audioContext.currentTime + windowDuration);
-
-        activeAudio.currentTime = currentPosition;
-        activeAudio.playbackRate = playbackSpeed;
-        activeAudio.play();
-
-        const newTimeout = setTimeout(() => {
-            activeGain.gain.setValueAtTime(1.0, audioContext.currentTime);
-            activeGain.gain.linearRampToValueAtTime(0, audioContext.currentTime + windowDuration);
-            setTimeout(() => activeAudio.pause(), windowDuration * 1000);
-        }, (chunkLength - windowDuration) * 1000);
-
-        if (useAudio1) {
-            timeout2 = newTimeout;
-            window.backwardTimeout2 = newTimeout;
-        } else {
-            timeout1 = newTimeout;
-            window.backwardTimeout1 = newTimeout;
-        }
-
-        useAudio1 = !useAudio1;
-
-        if (currentPosition <= 0) {
+    htmlAudioElement.onended = () => {
+        if (isPlaying) {
             stopPlayback();
+            pauseTime = audioBuffer.duration;
+            seekBar.value = audioBuffer.duration;
+            currentTimeDisplay.textContent = formatTime(audioBuffer.duration);
+            playBtn.style.display = 'inline-block';
+            pauseBtn.style.display = 'none';
         }
-    }, updateInterval);
+    };
+
+    updateForwardTimeDisplay();
 }
 
-function stopBackwardPlayback() {
-    if (intervalId) {
-        clearInterval(intervalId);
-        intervalId = null;
+function updateForwardTimeDisplay() {
+    if (animationFrame) {
+        clearTimeout(animationFrame);
+        animationFrame = null;
     }
-    if (window.backwardTimeout1) {
-        clearTimeout(window.backwardTimeout1);
-        window.backwardTimeout1 = null;
-    }
-    if (window.backwardTimeout2) {
-        clearTimeout(window.backwardTimeout2);
-        window.backwardTimeout2 = null;
-    }
-    audio1.pause();
-    audio2.pause();
+
+    const updateInterval = 50;
+    const update = () => {
+        if (!isPlaying || navigationSpeed < 0) return;
+
+        const currentPos = htmlAudioElement.currentTime;
+        seekBar.value = currentPos;
+        currentTimeDisplay.textContent = formatTime(currentPos);
+
+        if (currentPos < audioBuffer.duration) {
+            animationFrame = setTimeout(update, updateInterval);
+        }
+    };
+
+    update();
 }
 
-function startForwardPlayback() {
-    stopBackwardPlayback();
-    if (positionUpdateInterval) {
-        clearInterval(positionUpdateInterval);
+function playReverseChunk(chunkEnd) {
+    if (!audioBuffer || !isPlaying) return;
+
+    const { segmentDuration, segmentStep, segmentIntervalMs, maxActiveSources, fadeDuration } = params.navigation;
+    const chunkStart = Math.max(0, chunkEnd - segmentDuration);
+    const chunkDuration = chunkEnd - chunkStart;
+    const overlapSeconds = Math.max(segmentDuration - segmentStep, 0);
+    const effectiveFade = Math.min(fadeDuration, overlapSeconds / 2, chunkDuration / 2);
+
+    if (chunkDuration <= 0 || chunkEnd <= 0) {
+        stopPlayback();
+        pauseTime = 0;
+        playBtn.style.display = 'inline-block';
+        pauseBtn.style.display = 'none';
+        return;
     }
 
-    gainNode1.gain.cancelScheduledValues(audioContext.currentTime);
-    gainNode2.gain.cancelScheduledValues(audioContext.currentTime);
-    gainNode1.gain.value = 1.0;
-    gainNode2.gain.value = 0;
+    const startSample = Math.floor(chunkStart * audioBuffer.sampleRate);
+    const endSample = Math.floor(chunkEnd * audioBuffer.sampleRate);
+    const lengthSamples = Math.max(1, endSample - startSample);
 
-    audio2.pause();
-    audio2.currentTime = 0;
+    const chunkBuffer = audioContext.createBuffer(
+        audioBuffer.numberOfChannels,
+        lengthSamples,
+        audioBuffer.sampleRate
+    );
 
-    audio1.currentTime = currentPosition;
-    audio1.playbackRate = Math.max(0.0625, filteredSpeed);
-    audio1.play();
+    for (let channel = 0; channel < audioBuffer.numberOfChannels; channel++) {
+        const originalData = audioBuffer.getChannelData(channel);
+        const chunkData = chunkBuffer.getChannelData(channel);
 
-    positionUpdateInterval = setInterval(() => {
-        if (!isPlaying || filteredSpeed < 0) {
-            clearInterval(positionUpdateInterval);
-            positionUpdateInterval = null;
+        const copyLength = Math.min(lengthSamples, originalData.length - startSample);
+        for (let i = 0; i < copyLength; i++) {
+            chunkData[i] = originalData[startSample + i];
+        }
+
+        const fadeSamples = Math.min(Math.floor(effectiveFade * audioBuffer.sampleRate), copyLength);
+        if (fadeSamples > 1) {
+            for (let i = 0; i < fadeSamples; i++) {
+                const fadeProgress = (i + 1) / fadeSamples;
+                const fadeInGain = Math.sin(fadeProgress * (Math.PI / 2));
+                chunkData[i] *= fadeInGain;
+                const fadeOutIndex = copyLength - 1 - i;
+                if (fadeOutIndex >= 0 && fadeOutIndex < copyLength) {
+                    const fadeOutProgress = (i + 1) / fadeSamples;
+                    const fadeOutGain = Math.sin((1 - fadeOutProgress) * (Math.PI / 2));
+                    chunkData[fadeOutIndex] *= Math.max(fadeOutGain, 0);
+                }
+            }
+        }
+    }
+
+    const source = audioContext.createBufferSource();
+    source.buffer = chunkBuffer;
+    source.playbackRate.value = params.playback.speed;
+    source.connect(audioContext.destination);
+
+    currentSource = source;
+    startTime = audioContext.currentTime;
+    pauseTime = chunkStart;
+
+    source.onended = () => {
+        activeSources.delete(source);
+    };
+    activeSources.add(source);
+    enforceMaxActiveSources(maxActiveSources);
+
+    source.start(0);
+
+    updateChunkTimeDisplay(chunkStart, chunkEnd);
+
+    const effectiveStep = segmentStep * Math.abs(filteredSpeed);
+    const effectiveInterval = (segmentIntervalMs / 1000) / Math.abs(filteredSpeed);
+    scheduleTimeout = setTimeout(() => {
+        const nextPosition = Math.max(0, chunkEnd - effectiveStep);
+        if (nextPosition <= 0) {
+            stopPlayback();
+            pauseTime = 0;
+            seekBar.value = 0;
+            currentTimeDisplay.textContent = formatTime(0);
+            playBtn.style.display = 'inline-block';
+            pauseBtn.style.display = 'none';
             return;
         }
-        currentPosition = audio1.currentTime;
-    }, 100);
+        playReverseChunk(nextPosition);
+    }, effectiveInterval * 1000);
+}
+
+function updateChunkTimeDisplay(chunkStart, chunkEnd) {
+    if (animationFrame) {
+        clearTimeout(animationFrame);
+        animationFrame = null;
+    }
+    const updateInterval = 50;
+    const update = () => {
+        if (!isPlaying) return;
+
+        const elapsed = (audioContext.currentTime - startTime) * params.playback.speed;
+        const currentPos = clamp(chunkStart + elapsed, 0, chunkEnd);
+
+        seekBar.value = currentPos;
+        currentTimeDisplay.textContent = formatTime(currentPos);
+
+        if (currentPos > chunkStart && currentPos < chunkEnd) {
+            animationFrame = setTimeout(update, updateInterval);
+        }
+    };
+
+    update();
+}
+
+function startPlayback() {
+    if (!audioBuffer) return;
+
+    if (audioContext.state === 'suspended') {
+        audioContext.resume();
+    }
+
+    // Clear manual pause flag when user explicitly starts playback
+    manuallyPaused = false;
+
+    if (Math.abs(filteredSpeed) < 0.1) {
+        const direction = Math.sign(navigationSpeed) || 1;
+        filteredSpeed = direction * 0.5;
+        navigationSpeed = filteredSpeed;
+        gestureTarget = filteredSpeed;
+        speedValue.textContent = navigationSpeed.toFixed(2);
+        filteredSpeedValue.textContent = filteredSpeed.toFixed(2);
+        speedBar.value = navigationSpeed;
+        filteredSpeedBar.value = filteredSpeed;
+    }
+
+    if (pauseTime <= 0 && filteredSpeed < 0) {
+        filteredSpeed = Math.abs(filteredSpeed);
+        navigationSpeed = filteredSpeed;
+        gestureTarget = filteredSpeed;
+        speedValue.textContent = navigationSpeed.toFixed(2);
+        filteredSpeedValue.textContent = filteredSpeed.toFixed(2);
+        speedBar.value = navigationSpeed;
+        filteredSpeedBar.value = filteredSpeed;
+    }
+
+    if (pauseTime >= audioBuffer.duration && filteredSpeed > 0) {
+        pauseTime = 0;
+        seekBar.value = 0;
+        currentTimeDisplay.textContent = formatTime(0);
+    }
+
+    if (pauseTime <= 0 && filteredSpeed < 0) {
+        pauseTime = audioBuffer.duration;
+        seekBar.value = audioBuffer.duration;
+        currentTimeDisplay.textContent = formatTime(audioBuffer.duration);
+    }
+
+    isPlaying = true;
+    playBtn.style.display = 'none';
+    pauseBtn.style.display = 'inline-block';
+
+    prevNavigationSpeed = filteredSpeed;
+
+    if (filteredSpeed < 0) {
+        playReverseChunk(pauseTime);
+    } else {
+        playForwardNormal(pauseTime);
+    }
+}
+
+function pausePlayback() {
+    // Set manual pause flag to prevent hand tracking from overriding pause
+    manuallyPaused = true;
+
+    if (navigationSpeed > 0 && htmlAudioElement.currentTime > 0) {
+        pauseTime = htmlAudioElement.currentTime;
+    } else {
+        pauseTime = parseFloat(seekBar.value);
+    }
+
+    stopPlayback();
+    playBtn.style.display = 'inline-block';
+    pauseBtn.style.display = 'none';
 }
 
 function stopPlayback() {
     isPlaying = false;
-    stopBackwardPlayback();
-    if (positionUpdateInterval) {
-        clearInterval(positionUpdateInterval);
-        positionUpdateInterval = null;
+
+    htmlAudioElement.pause();
+
+    activeSources.forEach((source) => {
+        try {
+            source.stop();
+        } catch (e) {}
+    });
+    activeSources.clear();
+    currentSource = null;
+
+    if (animationFrame) {
+        clearTimeout(animationFrame);
+        animationFrame = null;
     }
-    audio1.pause();
-    audio2.pause();
+
+    if (scheduleTimeout) {
+        clearTimeout(scheduleTimeout);
+        scheduleTimeout = null;
+    }
+
+    if (speedSmoothingHandle) {
+        cancelAnimationFrame(speedSmoothingHandle);
+        speedSmoothingHandle = null;
+    }
+
+    if (filterAnimationFrame) {
+        cancelAnimationFrame(filterAnimationFrame);
+        filterAnimationFrame = null;
+    }
 }
 
-playButton.addEventListener("click", () => {
-    initAudioContext();
+function formatTime(time) {
+    const mins = Math.floor(time / 60);
+    const secs = Math.floor(time % 60);
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+}
 
-    if (isPlaying) {
-        stopPlayback();
-    } else {
-        isPlaying = true;
-        if (filteredSpeed < 0) {
-            startBackwardPlayback();
-        } else {
-            startForwardPlayback();
+function clamp(value, min, max) {
+    return Math.min(Math.max(value, min), max);
+}
+
+function updateTargetNavigationSpeed(target) {
+    target = clamp(target, params.navigation.minSpeed, params.navigation.maxSpeed);
+    
+    speedBar.value = target;
+    navigationSpeed = target;
+    speedValue.textContent = navigationSpeed.toFixed(2);
+    speedState.target = target;
+    
+    gestureTarget = target;
+
+    if (!filterAnimationFrame) {
+        updateFilteredSpeed();
+    }
+
+    if (!isPlaying) {
+        filteredSpeed = target;
+        filteredSpeedValue.textContent = filteredSpeed.toFixed(2);
+        filteredSpeedBar.value = filteredSpeed;
+        speedState.current = target;
+        speedState.velocity = 0;
+        speedState.boost = 0;
+        
+        if (filterAnimationFrame) {
+            cancelAnimationFrame(filterAnimationFrame);
+            filterAnimationFrame = null;
         }
     }
-});
+}
 
-speedSlider.addEventListener("input", () => {
-    currentSpeed = parseFloat(speedSlider.value);
-    targetSpeedMomentum = currentSpeed;
-    targetSpeedDisplay.textContent = currentSpeed.toFixed(2) + 'x';
-    if (filterAnimationId) {
-        cancelAnimationFrame(filterAnimationId);
+function enforceMaxActiveSources(limit) {
+    while (activeSources.size > limit) {
+        const oldest = activeSources.values().next().value;
+        if (!oldest) break;
+        activeSources.delete(oldest);
+        try {
+            oldest.stop();
+        } catch (e) {}
     }
-    updateFilteredSpeed();
-});
+}
 
-audio1.addEventListener("ended", () => {
-    if (filteredSpeed >= 0) {
-        stopPlayback();
+// Control mode toggle event listeners
+distanceModeRadio.addEventListener('change', () => {
+    if (distanceModeRadio.checked) {
+        controlMode = 'distance';
+        distanceModeInstructions.style.display = 'block';
+        speedModeInstructions.style.display = 'none';
+        resetRotationState();
+        velocityHistory = [];
+        fingerVelocity = 0;
     }
 });
 
-reversePlaybackSpeedInput.addEventListener("input", () => {
-    if (isPlaying && filteredSpeed < 0) {
-        startBackwardPlayback();
+speedModeRadio.addEventListener('change', () => {
+    if (speedModeRadio.checked) {
+        controlMode = 'speed';
+        distanceModeInstructions.style.display = 'none';
+        speedModeInstructions.style.display = 'block';
+        resetRotationState();
+        velocityHistory = [];
+        fingerVelocity = 0;
     }
 });
 
