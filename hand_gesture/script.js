@@ -74,10 +74,12 @@ let audioContext;
 let audioBuffer;
 let currentSource = null;
 let isPlaying = false;
-let manuallyPaused = false; // Flag to prevent hand tracking from overriding pause
+let manuallyPaused = false;
 let navigationSpeed = 1.0;
+let rawNavigationSpeed = 1.0; // Track raw speed before dead zone mapping
 let filteredSpeed = 1.0;
 let gestureTarget = 0.7;
+let previousGestureTarget = 0.7; // Track previous target for jump detection
 let filterAnimationFrame = null;
 let startTime = 0;
 let pauseTime = 0;
@@ -119,7 +121,7 @@ const driftTargetValue = document.getElementById('driftTargetValue');
 const activeAlphaDisplay = document.getElementById('activeAlphaDisplay');
 const alphaStateText = document.getElementById('alphaStateText');
 
-// Amplitude control element - ADDED
+// Amplitude control element
 const amplitudeInput = document.getElementById('amplitudeInput');
 const amplitudeValue = document.getElementById('amplitudeValue');
 
@@ -164,8 +166,8 @@ async function initializeHands() {
         hands.setOptions({
             maxNumHands: 1,
             modelComplexity: 1,
-            minDetectionConfidence: 0.5,  // Lowered from 0.7 for faster movement
-            minTrackingConfidence: 0.5     // Lowered from 0.7 for faster movement
+            minDetectionConfidence: 0.5,
+            minTrackingConfidence: 0.5
         });
 
         hands.onResults(onResults);
@@ -213,15 +215,8 @@ function onResults(results) {
             handTimeoutTimer = null;
         }
         
-        // Don't draw full hand skeleton - only highlight index finger
-        // drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS,
-        //     {color: 'rgba(255, 255, 255, 0.3)', lineWidth: 2});
-        // drawLandmarks(canvasCtx, landmarks,
-        //     {color: 'rgba(255, 255, 255, 0.5)', lineWidth: 1, radius: 2});
-        
         highlightIndexFinger(landmarks);
 
-        // Dispatch to the appropriate control mode
         if (controlMode === 'distance') {
             detectIndexFingerRotation(landmarks);
         } else {
@@ -278,11 +273,9 @@ function detectIndexFingerRotation(landmarks) {
         const distance = Math.sqrt(dx * dx + dy * dy);
         
         if (distance < MIN_MOVEMENT) {
-            // Hand detected but not moving - keep input stable, let filtered catch up
             if (!manuallyPaused) {
                 gestureTarget = navigationSpeed;
             }
-            // Reset rotation speed display to 0
             speedDisplay.textContent = '0°/s';
             rotationVelocity = 0;
             if (!filterAnimationFrame && !manuallyPaused) {
@@ -330,8 +323,10 @@ function detectIndexFingerRotation(landmarks) {
     if (validSamples === 0) {
         speedDisplay.textContent = '0°/s';
         rotationVelocity = 0;
-        setGestureTargetForDrift();
-        if (!filterAnimationFrame) {
+        if (!manuallyPaused) {
+            gestureTarget = navigationSpeed;
+        }
+        if (!filterAnimationFrame && !manuallyPaused) {
             updateFilteredSpeed();
         }
         return;
@@ -349,8 +344,6 @@ function detectIndexFingerRotation(landmarks) {
                         frameTimestamps[0]) / 1000;
         
         if (timeDiff > 0) {
-            // avgAngularVelocity is already the current frame's angular change
-            // Just scale it for display as degrees per second
             const frameDuration = timeDiff / (frameTimestamps.length - 1);
             rotationVelocity = avgAngularVelocity / frameDuration;
             
@@ -375,7 +368,6 @@ function detectIndexFingerRotation(landmarks) {
                     updateFilteredSpeed();
                 }
             } else {
-                // Rotation is very small but hand is still detected - keep input stable, let filtered catch up
                 if (!manuallyPaused) {
                     gestureTarget = navigationSpeed;
                 }
@@ -401,79 +393,76 @@ function detectIndexFingerRotation(landmarks) {
 }
 
 function setGestureTargetFromRotation(direction) {
-    // Don't update speed if manually paused
     if (manuallyPaused) return;
 
-    // UPDATED: Multiply speedIncrement by amplitude
-    const speedIncrement = 0.05 * params.filtering.gestureAmplitude;
+    const baseIncrement = 0.05 * params.filtering.gestureAmplitude;
     const maxSpeed = params.navigation.maxSpeed;
     const minSpeed = params.navigation.minSpeed;
 
+    const inDeadZone = rawNavigationSpeed > -1.0 && rawNavigationSpeed < 0.7;
+    const speedIncrement = inDeadZone ? baseIncrement * 5 : baseIncrement;
+
     if (direction > 0) {
-        navigationSpeed = Math.min(navigationSpeed + speedIncrement, maxSpeed);
+        rawNavigationSpeed = Math.min(rawNavigationSpeed + speedIncrement, maxSpeed);
     } else {
-        navigationSpeed = Math.max(navigationSpeed - speedIncrement, minSpeed);
+        rawNavigationSpeed = Math.max(rawNavigationSpeed - speedIncrement, minSpeed);
     }
 
-    speedBar.value = navigationSpeed;
-    speedValue.textContent = navigationSpeed.toFixed(2);
-
-    gestureTarget = navigationSpeed;
+    const newNavigationSpeed = applyDeadZoneMapping(rawNavigationSpeed);
+    
+    if (newNavigationSpeed !== navigationSpeed) {
+        navigationSpeed = newNavigationSpeed;
+        speedBar.value = navigationSpeed;
+        speedValue.textContent = navigationSpeed.toFixed(2);
+        gestureTarget = navigationSpeed;
+        
+        if (!filterAnimationFrame) {
+            updateFilteredSpeed();
+        }
+    }
 }
 
 function setGestureTargetForDrift() {
-    // Don't update speed if manually paused
     if (manuallyPaused) return;
 
     if (filteredSpeed > 0) {
-        // Set drift target - navigationSpeed will gradually follow filteredSpeed
         gestureTarget = params.filtering.driftTarget;
     } else {
-        // For negative speeds, maintain current speed (no drift)
         gestureTarget = filteredSpeed;
     }
 
-    // Update navigationSpeed to follow filteredSpeed (the smoothed output)
-    // This makes the input slider track the actual playback speed
     navigationSpeed = filteredSpeed;
+    rawNavigationSpeed = filteredSpeed;
     speedBar.value = navigationSpeed;
     speedValue.textContent = navigationSpeed.toFixed(2);
 }
 
-// ========== SPEED MODE: Fingertip Velocity Detection ==========
 function detectFingerVelocity(landmarks) {
     const indexTip = landmarks[8];
     const currentPos = { x: indexTip.x, y: indexTip.y };
     const currentTime = Date.now();
 
-    // Store position history
     previousAngles.push(currentPos);
     frameTimestamps.push(currentTime);
 
-    // Keep only recent history
     if (previousAngles.length > 6) {
         previousAngles.shift();
         frameTimestamps.shift();
     }
 
-    // Need at least 3 frames to calculate rotation
     if (previousAngles.length < 3) return;
 
-    // Calculate signed area using the shoelace formula for rotation detection
     let signedArea = 0;
     for (let i = 0; i < previousAngles.length - 1; i++) {
         const p1 = previousAngles[i];
         const p2 = previousAngles[i + 1];
-        // Shoelace formula for screen coordinates
         signedArea += (p1.x * p2.y - p2.x * p1.y);
     }
-    // Close the polygon
     const pFirst = previousAngles[0];
     const pLast = previousAngles[previousAngles.length - 1];
     signedArea += (pLast.x * pFirst.y - pFirst.x * pLast.y);
 
-    // Store velocity history for smoothing (reuse velocityHistory array)
-    const SMOOTHING_ALPHA = 0.05; // Heavy smoothing
+    const SMOOTHING_ALPHA = 0.05;
     if (velocityHistory.length === 0) {
         velocityHistory.push(signedArea);
     } else {
@@ -486,17 +475,13 @@ function detectFingerVelocity(landmarks) {
         }
     }
 
-    const smoothedArea = -velocityHistory[velocityHistory.length - 1]; // NEGATE to fix direction
-
-    // Display velocity (scale to show meaningful numbers)
-    const displaySpeed = Math.abs(smoothedArea) * 10000; // Increased scale for better display
+    const smoothedArea = -velocityHistory[velocityHistory.length - 1];
+    const displaySpeed = Math.abs(smoothedArea) * 10000;
     speedDisplay.textContent = `${Math.round(displaySpeed)}°/s`;
 
-    // Map rotation to audio speed
     const MIN_ROTATION = 0.001;
 
     if (Math.abs(smoothedArea) < MIN_ROTATION) {
-        // Hand is not rotating - drift to 0 in speed mode
         if (!manuallyPaused) {
             gestureTarget = 0;
             navigationSpeed = 0;
@@ -504,7 +489,6 @@ function detectFingerVelocity(landmarks) {
             speedValue.textContent = '0.00';
         }
 
-        // Update direction display
         rotationText.textContent = 'Hold Still';
         detectionStatus.style.background = 'rgba(100, 100, 100, 0.7)';
         currentDirection.innerHTML = '<span>⊙</span>';
@@ -513,15 +497,11 @@ function detectFingerVelocity(landmarks) {
             updateFilteredSpeed();
         }
     } else {
-        // Hand is rotating - map rotation to speed
         if (!manuallyPaused) {
-            // Map smoothedArea to velocity for speed control
-            // Scale it appropriately (reduced from 100 to 50 for less sensitivity)
-            const rotationVelocity = smoothedArea * 50; // Scale factor
+            const rotationVelocity = smoothedArea * 50;
             setGestureTargetFromVelocity(rotationVelocity);
         }
 
-        // Update direction display based on rotation
         if (smoothedArea > 0) {
             rotationText.textContent = '↻ Clockwise';
             detectionStatus.style.background = 'rgba(74, 222, 128, 0.7)';
@@ -539,23 +519,25 @@ function detectFingerVelocity(landmarks) {
 }
 
 function setGestureTargetFromVelocity(velocity) {
-    // Don't update speed if manually paused
     if (manuallyPaused) return;
 
-    // Map velocity to speed range
-    // UPDATED: Multiply VELOCITY_SCALE by amplitude
     const VELOCITY_SCALE = 3 * params.filtering.gestureAmplitude;
     const maxSpeed = params.navigation.maxSpeed;
     const minSpeed = params.navigation.minSpeed;
 
-    // Direct mapping: velocity -> speed
     const targetSpeed = velocity * VELOCITY_SCALE;
-    navigationSpeed = clamp(targetSpeed, minSpeed, maxSpeed);
+    rawNavigationSpeed = clamp(targetSpeed, minSpeed, maxSpeed);
+
+    navigationSpeed = applyDeadZoneMapping(rawNavigationSpeed);
 
     speedBar.value = navigationSpeed;
     speedValue.textContent = navigationSpeed.toFixed(2);
 
     gestureTarget = navigationSpeed;
+    
+    if (!filterAnimationFrame) {
+        updateFilteredSpeed();
+    }
 }
 
 function setRotation(direction) {
@@ -588,6 +570,17 @@ function resetRotationState() {
     fingerVelocity = 0;
     angleDisplay.textContent = '0°';
     speedDisplay.textContent = '0°/s';
+}
+
+function applyDeadZoneMapping(speed) {
+    const DEAD_ZONE_MIN = -1.0;
+    const DEAD_ZONE_MAX = 0.7;
+    
+    if (speed > DEAD_ZONE_MIN && speed < DEAD_ZONE_MAX) {
+        return speed >= 0 ? DEAD_ZONE_MAX : DEAD_ZONE_MIN;
+    }
+    
+    return speed;
 }
 
 // ========== AUDIO PLAYER FUNCTIONS ==========
@@ -661,19 +654,20 @@ loadDefaultBtn.addEventListener('click', async () => {
         stopPlayback();
     } catch (error) {
         console.error('Error loading default audio:', error);
-        alert('Failed to load default audio file. Make sure "around-the-world-in-80-days-chapter-10.mp3" is in the same folder as your HTML file.');
+        alert('Failed to load default audio file.');
     }
 });
 
 speedBar.addEventListener('input', (e) => {
     let newSpeed = clamp(parseFloat(e.target.value), params.navigation.minSpeed, params.navigation.maxSpeed);
 
+    newSpeed = applyDeadZoneMapping(newSpeed);
+
     navigationSpeed = newSpeed;
+    rawNavigationSpeed = newSpeed;
     speedValue.textContent = newSpeed.toFixed(2);
 
     gestureTarget = newSpeed;
-
-    // Clear manual pause when user manually adjusts speed
     manuallyPaused = false;
 
     if (!filterAnimationFrame) {
@@ -701,15 +695,12 @@ alphaNoFingerInput.addEventListener('input', (e) => {
 
 driftTargetInput.addEventListener('input', (e) => {
     const value = parseFloat(e.target.value);
-    // Only update if value is valid (not NaN)
     if (!isNaN(value)) {
         params.filtering.driftTarget = clamp(value, 0.1, 4);
         driftTargetValue.textContent = params.filtering.driftTarget.toFixed(2);
     }
-    // If NaN (empty field), keep the previous valid value
 });
 
-// ADDED: Amplitude input listener
 amplitudeInput.addEventListener('input', (e) => {
     const value = parseFloat(e.target.value);
     if (!isNaN(value)) {
@@ -720,7 +711,6 @@ amplitudeInput.addEventListener('input', (e) => {
 
 function updateAlphaDisplay() {
     const currentAlpha = isFingerDetected ? params.filtering.alphaFinger : params.filtering.alphaNoFinger;
-    // Show 4 decimal places for very small values, 3 for larger ones
     const decimals = currentAlpha < 0.001 ? 4 : 3;
     activeAlphaDisplay.textContent = currentAlpha.toFixed(decimals);
     
@@ -776,7 +766,6 @@ fadeDurationInput.addEventListener('input', (e) => {
 });
 
 function updateFilteredSpeed() {
-    // Don't apply speed changes if manually paused
     if (manuallyPaused) {
         if (filterAnimationFrame) {
             cancelAnimationFrame(filterAnimationFrame);
@@ -786,28 +775,76 @@ function updateFilteredSpeed() {
     }
 
     const alpha = isFingerDetected ? params.filtering.alphaFinger : params.filtering.alphaNoFinger;
-
     updateAlphaDisplay();
 
-    const oldFilteredSpeed = filteredSpeed;
+    const previousTargetSign = Math.sign(previousGestureTarget);
+    const currentTargetSign = Math.sign(gestureTarget);
+    const targetCrossedDeadZone = (previousTargetSign !== 0 && currentTargetSign !== 0 && previousTargetSign !== currentTargetSign);
+    const targetJumped = Math.abs(gestureTarget - previousGestureTarget) > 1.5;
     
-    // Check for direction change BEFORE updating filteredSpeed
-    const currentDirection = Math.sign(oldFilteredSpeed);
-    const targetDirection = Math.sign(gestureTarget);
-    const directionChanged = (currentDirection !== 0 && targetDirection !== 0 && currentDirection !== targetDirection);
-    
-    // If direction changed while playing, immediately switch modes
-    if (directionChanged && isPlaying) {
-        const currentPos = parseFloat(seekBar.value);
-        pauseTime = currentPos;
-        
-        // Immediately snap filteredSpeed to target direction with reasonable minimum
-        const minSpeed = 0.5; // Start with reasonable speed instead of 0.15
-        filteredSpeed = targetDirection * Math.max(Math.abs(gestureTarget), minSpeed);
+    if (targetCrossedDeadZone || targetJumped) {
+        filteredSpeed = gestureTarget;
         filteredSpeedValue.textContent = filteredSpeed.toFixed(2);
         filteredSpeedBar.value = filteredSpeed;
         
-        // Stop all current playback
+        if (isPlaying) {
+            const currentPos = parseFloat(seekBar.value);
+            pauseTime = currentPos;
+            
+            activeSources.forEach((source) => {
+                try { source.stop(); } catch (e) {}
+            });
+            activeSources.clear();
+            if (scheduleTimeout) {
+                clearTimeout(scheduleTimeout);
+                scheduleTimeout = null;
+            }
+            htmlAudioElement.pause();
+            
+            prevNavigationSpeed = filteredSpeed;
+            
+            if (filteredSpeed < 0) {
+                playReverseChunk(pauseTime);
+            } else {
+                playForwardNormal(pauseTime);
+            }
+        }
+        
+        previousGestureTarget = gestureTarget;
+        
+        if (filterAnimationFrame) {
+            cancelAnimationFrame(filterAnimationFrame);
+            filterAnimationFrame = null;
+        }
+        return;
+    }
+    
+    const prevFilteredSpeed = filteredSpeed;
+    filteredSpeed = filteredSpeed - alpha * (filteredSpeed - gestureTarget);
+    
+    // Jump across the dead zone if we're passing through it
+    const DEAD_ZONE_MIN = -1.0;
+    const DEAD_ZONE_MAX = 0.7;
+    let crossedDeadZone = false;
+    if (filteredSpeed > DEAD_ZONE_MIN && filteredSpeed < DEAD_ZONE_MAX) {
+        // Check which direction we're moving based on the target
+        if (gestureTarget >= DEAD_ZONE_MAX) {
+            filteredSpeed = DEAD_ZONE_MAX;
+            crossedDeadZone = (prevFilteredSpeed < 0);
+        } else if (gestureTarget <= DEAD_ZONE_MIN) {
+            filteredSpeed = DEAD_ZONE_MIN;
+            crossedDeadZone = (prevFilteredSpeed > 0);
+        }
+    }
+    
+    filteredSpeedValue.textContent = filteredSpeed.toFixed(2);
+    filteredSpeedBar.value = filteredSpeed;
+    
+    // If we crossed the dead zone, restart playback in the new direction
+    if (crossedDeadZone && isPlaying) {
+        const currentPos = parseFloat(seekBar.value);
+        pauseTime = currentPos;
+        
         activeSources.forEach((source) => {
             try { source.stop(); } catch (e) {}
         });
@@ -820,26 +857,18 @@ function updateFilteredSpeed() {
         
         prevNavigationSpeed = filteredSpeed;
         
-        // Start playback in new direction IMMEDIATELY
-        if (targetDirection < 0) {
+        if (filteredSpeed < 0) {
             playReverseChunk(pauseTime);
         } else {
             playForwardNormal(pauseTime);
         }
-        
-        // Continue filtering to reach actual target
-        filterAnimationFrame = requestAnimationFrame(updateFilteredSpeed);
-        return;
-    } else {
-        // Normal smooth filtering when not changing direction
-        filteredSpeed = filteredSpeed - alpha * (filteredSpeed - gestureTarget);
-        filteredSpeedValue.textContent = filteredSpeed.toFixed(2);
-        filteredSpeedBar.value = filteredSpeed;
-        
-        if (isPlaying) {
-            applyFilteredSpeed();
-        }
     }
+    
+    if (isPlaying) {
+        applyFilteredSpeed();
+    }
+
+    previousGestureTarget = gestureTarget;
 
     const diff = Math.abs(gestureTarget - filteredSpeed);
     if (diff > 0.001) {
@@ -883,7 +912,6 @@ pauseBtn.addEventListener('click', pausePlayback);
 
 resetBtn.addEventListener('click', () => {
     stopPlayback();
-    // Clear manual pause on reset
     manuallyPaused = false;
 
     if (navigationSpeed < 0) {
@@ -1058,13 +1086,13 @@ function startPlayback() {
         audioContext.resume();
     }
 
-    // Clear manual pause flag when user explicitly starts playback
     manuallyPaused = false;
 
     if (Math.abs(filteredSpeed) < 0.1) {
         const direction = Math.sign(navigationSpeed) || 1;
         filteredSpeed = direction * 0.5;
         navigationSpeed = filteredSpeed;
+        rawNavigationSpeed = filteredSpeed;
         gestureTarget = filteredSpeed;
         speedValue.textContent = navigationSpeed.toFixed(2);
         filteredSpeedValue.textContent = filteredSpeed.toFixed(2);
@@ -1075,6 +1103,7 @@ function startPlayback() {
     if (pauseTime <= 0 && filteredSpeed < 0) {
         filteredSpeed = Math.abs(filteredSpeed);
         navigationSpeed = filteredSpeed;
+        rawNavigationSpeed = filteredSpeed;
         gestureTarget = filteredSpeed;
         speedValue.textContent = navigationSpeed.toFixed(2);
         filteredSpeedValue.textContent = filteredSpeed.toFixed(2);
@@ -1108,7 +1137,6 @@ function startPlayback() {
 }
 
 function pausePlayback() {
-    // Set manual pause flag to prevent hand tracking from overriding pause
     manuallyPaused = true;
 
     if (navigationSpeed > 0 && htmlAudioElement.currentTime > 0) {
@@ -1206,7 +1234,6 @@ function enforceMaxActiveSources(limit) {
     }
 }
 
-// Control mode toggle event listeners
 distanceModeRadio.addEventListener('change', () => {
     if (distanceModeRadio.checked) {
         controlMode = 'distance';
