@@ -18,7 +18,7 @@ let handTimeoutTimer = null;
 let isFingerDetected = false;
 
 // Control mode variables
-let controlMode = 'distance'; // 'distance' or 'speed'
+let controlMode = 'distance'; // 'distance', 'speed', or 'touch'
 let velocityHistory = [];
 let fingerVelocity = 0;
 
@@ -52,8 +52,7 @@ const handSection = document.getElementById('handSection');
 // Control mode toggle elements
 const distanceModeRadio = document.getElementById('distanceMode');
 const speedModeRadio = document.getElementById('speedMode');
-const distanceModeInstructions = document.getElementById('distanceModeInstructions');
-const speedModeInstructions = document.getElementById('speedModeInstructions');
+const touchModeRadio = document.getElementById('touchMode');
 
 // ========== AUDIO PLAYER VARIABLES ==========
 const params = {
@@ -149,6 +148,40 @@ const effectiveIntervalDisplay = document.getElementById('effectiveInterval');
 const MIN_PLAYBACK_RATE = 0.0625;
 const MAX_PLAYBACK_RATE = 16.0;
 
+// Create mainScriptAPI object for TouchControl
+const mainScriptAPI = {
+    // Variables
+    get controlMode() { return controlMode; },
+    get navigationSpeed() { return navigationSpeed; },
+    set navigationSpeed(val) { navigationSpeed = val; },
+    get gestureTarget() { return gestureTarget; },
+    set gestureTarget(val) { gestureTarget = val; },
+    get manuallyPaused() { return manuallyPaused; },
+    set manuallyPaused(val) { manuallyPaused = val; },
+    get filterAnimationFrame() { return filterAnimationFrame; },
+    get params() { return params; },
+    get isPlaying() { return isPlaying; },
+    get audioBuffer() { return audioBuffer; },
+    get filteredSpeed() { return filteredSpeed; },
+    
+    // DOM elements
+    speedBar,
+    speedValue,
+    fingerStatus,
+    filteredSpeedBar,
+    filteredSpeedValue,
+    seekBar,
+    currentTimeDisplay,
+    
+    // Functions
+    clamp,
+    updateFilteredSpeed: () => updateFilteredSpeed(),
+    setGestureTargetForDrift: () => setGestureTargetForDrift(),
+    startPlayback: () => startPlayback(),
+    pausePlayback: () => pausePlayback(),
+    formatTime: (time) => formatTime(time)
+};
+
 // ========== HAND RECOGNITION FUNCTIONS ==========
 function showError(message) {
     errorMessage.textContent = message;
@@ -193,17 +226,14 @@ async function initializeHands() {
 
         camera = new Camera(videoElement, {
             onFrame: async () => {
-                try {
-                    await hands.send({image: videoElement});
-                } catch (error) {
-                    console.error('Frame processing error:', error);
-                }
+                await hands.send({image: videoElement});
             },
             width: 640,
             height: 480
         });
 
         await camera.start();
+        camera.isStarted = true;
         console.log("Camera started successfully!");
         hideLoading();
 
@@ -213,7 +243,36 @@ async function initializeHands() {
     }
 }
 
+function stopCamera() {
+    if (camera && camera.isStarted) {
+        const stream = videoElement.srcObject;
+        if (stream) {
+            stream.getTracks().forEach(track => track.stop());
+        }
+        videoElement.srcObject = null;
+        camera.isStarted = false;
+        console.log("Camera stopped");
+    }
+}
+
+async function restartCamera() {
+    if (!camera || camera.isStarted) return;
+    
+    try {
+        await camera.start();
+        camera.isStarted = true;
+        console.log("Camera restarted");
+    } catch (error) {
+        console.error('Error restarting camera:', error);
+        showError(`Failed to restart camera: ${error.message}`);
+    }
+}
+
 function onResults(results) {
+    if (controlMode === 'touch') {
+        return;
+    }
+    
     canvasElement.width = videoElement.videoWidth;
     canvasElement.height = videoElement.videoHeight;
     
@@ -232,7 +291,6 @@ function onResults(results) {
             handTimeoutTimer = null;
         }
         
-        // Check for play/pause gestures
         if (gestureControlEnabled) {
             detectPlayPauseGesture(landmarks);
         }
@@ -249,7 +307,6 @@ function onResults(results) {
         fingerStatus.textContent = '❌';
         resetRotationState();
         
-        // Reset gesture holds when hand disappears
         isFistHolding = false;
         fistHoldStartTime = 0;
         isPalmHolding = false;
@@ -618,48 +675,40 @@ function detectPlayPauseGesture(landmarks) {
     const isFist = detectFist(landmarks);
     const isPalm = detectOpenPalm(landmarks);
     
-    // FIST HOLD TO PLAY/RESUME
     if (isFist) {
         if (!isPlaying && !isFistHolding) {
-            // Start the hold timer
             isFistHolding = true;
             fistHoldStartTime = currentTime;
         } else if (!isPlaying && isFistHolding) {
-            // Check if held long enough
             const holdDuration = currentTime - fistHoldStartTime;
             
             if (holdDuration >= fistHoldDuration) {
                 console.log('Gesture: Fist held - Starting playback');
                 startPlayback();
                 lastGestureToggleTime = currentTime;
-                isFistHolding = false; // Reset immediately after starting
+                isFistHolding = false;
             }
         }
     } else {
-        // Hand opened - reset fist tracking
         isFistHolding = false;
         fistHoldStartTime = 0;
     }
     
-    // OPEN PALM HOLD TO PAUSE
     if (isPalm) {
         if (isPlaying && !isPalmHolding) {
-            // Start the hold timer
             isPalmHolding = true;
             palmHoldStartTime = currentTime;
         } else if (isPlaying && isPalmHolding) {
-            // Check if held long enough
             const holdDuration = currentTime - palmHoldStartTime;
             
             if (holdDuration >= palmHoldDuration) {
                 console.log('Gesture: Open palm held - Pausing playback');
                 pausePlayback();
                 lastGestureToggleTime = currentTime;
-                isPalmHolding = false; // Reset immediately after pausing
+                isPalmHolding = false;
             }
         }
     } else {
-        // Hand closed or moved - reset palm tracking
         isPalmHolding = false;
         palmHoldStartTime = 0;
     }
@@ -669,54 +718,36 @@ function detectPlayPauseGesture(landmarks) {
 }
 
 function detectFist(landmarks) {
-    const palmBase = landmarks[0];
-    const fingerTips = [
-        landmarks[4],  // thumb
-        landmarks[8],  // index
-        landmarks[12], // middle
-        landmarks[16], // ring
-        landmarks[20]  // pinky
+    const fingersCurled = [
+        landmarks[8].y > landmarks[6].y,
+        landmarks[12].y > landmarks[10].y,
+        landmarks[16].y > landmarks[14].y,
+        landmarks[20].y > landmarks[18].y
     ];
+    const curledCount = fingersCurled.filter(curled => curled).length;
     
-    let closedCount = 0;
-    const FIST_THRESHOLD = 0.15;
-    
-    for (const tip of fingerTips) {
-        const dx = tip.x - palmBase.x;
-        const dy = tip.y - palmBase.y;
-        const distance = Math.sqrt(dx * dx + dy * dy);
-        
-        if (distance < FIST_THRESHOLD) {
-            closedCount++;
-        }
-    }
-    
-    // Consider it a fist if at least 4 fingers are closed
-    return closedCount >= 4;
+    return curledCount >= 3;
 }
 
 function detectOpenPalm(landmarks) {
-    // Check if all fingertips are far from palm (open hand)
     const palmBase = landmarks[0];
     const wrist = landmarks[0];
-    const middleBase = landmarks[9]; // base of middle finger
+    const middleBase = landmarks[9];
     
     const fingerTips = [
-        landmarks[4],  // thumb
-        landmarks[8],  // index
-        landmarks[12], // middle
-        landmarks[16], // ring
-        landmarks[20]  // pinky
+        landmarks[4],
+        landmarks[8],
+        landmarks[12],
+        landmarks[16],
+        landmarks[20]
     ];
     
-    // Calculate palm size for reference
     const palmDx = middleBase.x - wrist.x;
     const palmDy = middleBase.y - wrist.y;
     const palmSize = Math.sqrt(palmDx * palmDx + palmDy * palmDy);
     
-    // Check if all fingers are extended (far from palm)
     let extendedCount = 0;
-    const OPEN_PALM_THRESHOLD = palmSize * 1.5; // fingers should be 1.5x palm size away
+    const OPEN_PALM_THRESHOLD = palmSize * 1.5;
     
     for (const tip of fingerTips) {
         const dx = tip.x - palmBase.x;
@@ -728,7 +759,39 @@ function detectOpenPalm(landmarks) {
         }
     }
     
-    // Consider it an open palm if at least 4 fingers are extended
+    return extendedCount >= 4;
+}
+
+function detectOpenPalm(landmarks) {
+    const palmBase = landmarks[0];
+    const wrist = landmarks[0];
+    const middleBase = landmarks[9];
+    
+    const fingerTips = [
+        landmarks[4],
+        landmarks[8],
+        landmarks[12],
+        landmarks[16],
+        landmarks[20]
+    ];
+    
+    const palmDx = middleBase.x - wrist.x;
+    const palmDy = middleBase.y - wrist.y;
+    const palmSize = Math.sqrt(palmDx * palmDx + palmDy * palmDy);
+    
+    let extendedCount = 0;
+    const OPEN_PALM_THRESHOLD = palmSize * 1.5;
+    
+    for (const tip of fingerTips) {
+        const dx = tip.x - palmBase.x;
+        const dy = tip.y - palmBase.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        
+        if (distance > OPEN_PALM_THRESHOLD) {
+            extendedCount++;
+        }
+    }
+    
     return extendedCount >= 4;
 }
 
@@ -1383,9 +1446,18 @@ function enforceMaxActiveSources(limit) {
 distanceModeRadio.addEventListener('change', () => {
     if (distanceModeRadio.checked) {
         controlMode = 'distance';
-        distanceModeInstructions.style.display = 'block';
-        speedModeInstructions.style.display = 'none';
         resetRotationState();
+        
+        handSection.style.display = 'block';
+        const touchSection = document.getElementById('touchControlSection');
+        if (touchSection) touchSection.style.display = 'none';
+        
+        restartCamera();
+        
+        if (typeof TouchControl !== 'undefined') {
+            TouchControl.disable();
+        }
+        
         velocityHistory = [];
         fingerVelocity = 0;
     }
@@ -1394,16 +1466,52 @@ distanceModeRadio.addEventListener('change', () => {
 speedModeRadio.addEventListener('change', () => {
     if (speedModeRadio.checked) {
         controlMode = 'speed';
-        distanceModeInstructions.style.display = 'none';
-        speedModeInstructions.style.display = 'block';
         resetRotationState();
+        
+        handSection.style.display = 'block';
+        const touchSection = document.getElementById('touchControlSection');
+        if (touchSection) touchSection.style.display = 'none';
+        
+        restartCamera();
+        
+        if (typeof TouchControl !== 'undefined') {
+            TouchControl.disable();
+        }
+        
         velocityHistory = [];
         fingerVelocity = 0;
     }
 });
 
+if (touchModeRadio) {
+    touchModeRadio.addEventListener('change', () => {
+        if (touchModeRadio.checked) {
+            controlMode = 'touch';
+            resetRotationState();
+            
+            handSection.style.display = 'none';
+            const touchSection = document.getElementById('touchControlSection');
+            if (touchSection) touchSection.style.display = 'block';
+            
+            stopCamera();
+            
+            if (typeof TouchControl !== 'undefined') {
+                TouchControl.init(mainScriptAPI);
+            } else {
+                console.warn('TouchControl module not loaded');
+            }
+        }
+    });
+}
+
 window.addEventListener('load', () => {
     setTimeout(() => {
-        initializeHands();
+        if (controlMode !== 'touch') {
+            initializeHands();
+        }
+        
+        if (typeof TouchControl !== 'undefined' && touchModeRadio && touchModeRadio.checked) {
+            TouchControl.init(mainScriptAPI);
+        }
     }, 1000);
 });
