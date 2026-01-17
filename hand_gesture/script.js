@@ -22,6 +22,19 @@ let controlMode = 'distance'; // 'distance' or 'speed'
 let velocityHistory = [];
 let fingerVelocity = 0;
 
+// Gesture control variables
+let gestureControlEnabled = true;
+let lastFistState = false;
+let lastPalmState = false;
+let gestureDebounceTime = 500;
+let lastGestureToggleTime = 0;
+let fistHoldStartTime = 0;
+let fistHoldDuration = 800;
+let isFistHolding = false;
+let palmHoldStartTime = 0;
+let palmHoldDuration = 800;
+let isPalmHolding = false;
+
 // DOM elements for hand recognition
 const videoElement = document.getElementById('inputVideo');
 const canvasElement = document.getElementById('outputCanvas');
@@ -76,10 +89,10 @@ let currentSource = null;
 let isPlaying = false;
 let manuallyPaused = false;
 let navigationSpeed = 1.0;
-let rawNavigationSpeed = 1.0; // Track raw speed before dead zone mapping
+let rawNavigationSpeed = 1.0;
 let filteredSpeed = 1.0;
 let gestureTarget = 0.7;
-let previousGestureTarget = 0.7; // Track previous target for jump detection
+let previousGestureTarget = 0.7;
 let filterAnimationFrame = null;
 let startTime = 0;
 let pauseTime = 0;
@@ -180,7 +193,11 @@ async function initializeHands() {
 
         camera = new Camera(videoElement, {
             onFrame: async () => {
-                await hands.send({image: videoElement});
+                try {
+                    await hands.send({image: videoElement});
+                } catch (error) {
+                    console.error('Frame processing error:', error);
+                }
             },
             width: 640,
             height: 480
@@ -215,6 +232,11 @@ function onResults(results) {
             handTimeoutTimer = null;
         }
         
+        // Check for play/pause gestures
+        if (gestureControlEnabled) {
+            detectPlayPauseGesture(landmarks);
+        }
+        
         highlightIndexFinger(landmarks);
 
         if (controlMode === 'distance') {
@@ -226,6 +248,12 @@ function onResults(results) {
         isFingerDetected = false;
         fingerStatus.textContent = '❌';
         resetRotationState();
+        
+        // Reset gesture holds when hand disappears
+        isFistHolding = false;
+        fistHoldStartTime = 0;
+        isPalmHolding = false;
+        palmHoldStartTime = 0;
         
         setGestureTargetForDrift();
         
@@ -583,6 +611,127 @@ function applyDeadZoneMapping(speed) {
     return speed;
 }
 
+// ========== PLAY/PAUSE GESTURE DETECTION ==========
+function detectPlayPauseGesture(landmarks) {
+    const currentTime = Date.now();
+    
+    const isFist = detectFist(landmarks);
+    const isPalm = detectOpenPalm(landmarks);
+    
+    // FIST HOLD TO PLAY/RESUME
+    if (isFist) {
+        if (!isPlaying && !isFistHolding) {
+            // Start the hold timer
+            isFistHolding = true;
+            fistHoldStartTime = currentTime;
+        } else if (!isPlaying && isFistHolding) {
+            // Check if held long enough
+            const holdDuration = currentTime - fistHoldStartTime;
+            
+            if (holdDuration >= fistHoldDuration) {
+                console.log('Gesture: Fist held - Starting playback');
+                startPlayback();
+                lastGestureToggleTime = currentTime;
+                isFistHolding = false; // Reset immediately after starting
+            }
+        }
+    } else {
+        // Hand opened - reset fist tracking
+        isFistHolding = false;
+        fistHoldStartTime = 0;
+    }
+    
+    // OPEN PALM HOLD TO PAUSE
+    if (isPalm) {
+        if (isPlaying && !isPalmHolding) {
+            // Start the hold timer
+            isPalmHolding = true;
+            palmHoldStartTime = currentTime;
+        } else if (isPlaying && isPalmHolding) {
+            // Check if held long enough
+            const holdDuration = currentTime - palmHoldStartTime;
+            
+            if (holdDuration >= palmHoldDuration) {
+                console.log('Gesture: Open palm held - Pausing playback');
+                pausePlayback();
+                lastGestureToggleTime = currentTime;
+                isPalmHolding = false; // Reset immediately after pausing
+            }
+        }
+    } else {
+        // Hand closed or moved - reset palm tracking
+        isPalmHolding = false;
+        palmHoldStartTime = 0;
+    }
+    
+    lastFistState = isFist;
+    lastPalmState = isPalm;
+}
+
+function detectFist(landmarks) {
+    const palmBase = landmarks[0];
+    const fingerTips = [
+        landmarks[4],  // thumb
+        landmarks[8],  // index
+        landmarks[12], // middle
+        landmarks[16], // ring
+        landmarks[20]  // pinky
+    ];
+    
+    let closedCount = 0;
+    const FIST_THRESHOLD = 0.15;
+    
+    for (const tip of fingerTips) {
+        const dx = tip.x - palmBase.x;
+        const dy = tip.y - palmBase.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        
+        if (distance < FIST_THRESHOLD) {
+            closedCount++;
+        }
+    }
+    
+    // Consider it a fist if at least 4 fingers are closed
+    return closedCount >= 4;
+}
+
+function detectOpenPalm(landmarks) {
+    // Check if all fingertips are far from palm (open hand)
+    const palmBase = landmarks[0];
+    const wrist = landmarks[0];
+    const middleBase = landmarks[9]; // base of middle finger
+    
+    const fingerTips = [
+        landmarks[4],  // thumb
+        landmarks[8],  // index
+        landmarks[12], // middle
+        landmarks[16], // ring
+        landmarks[20]  // pinky
+    ];
+    
+    // Calculate palm size for reference
+    const palmDx = middleBase.x - wrist.x;
+    const palmDy = middleBase.y - wrist.y;
+    const palmSize = Math.sqrt(palmDx * palmDx + palmDy * palmDy);
+    
+    // Check if all fingers are extended (far from palm)
+    let extendedCount = 0;
+    const OPEN_PALM_THRESHOLD = palmSize * 1.5; // fingers should be 1.5x palm size away
+    
+    for (const tip of fingerTips) {
+        const dx = tip.x - palmBase.x;
+        const dy = tip.y - palmBase.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        
+        if (distance > OPEN_PALM_THRESHOLD) {
+            extendedCount++;
+        }
+    }
+    
+    // Consider it an open palm if at least 4 fingers are extended
+    return extendedCount >= 4;
+}
+
 // ========== AUDIO PLAYER FUNCTIONS ==========
 audioContext = new (window.AudioContext || window.webkitAudioContext)();
 
@@ -822,12 +971,10 @@ function updateFilteredSpeed() {
     const prevFilteredSpeed = filteredSpeed;
     filteredSpeed = filteredSpeed - alpha * (filteredSpeed - gestureTarget);
     
-    // Jump across the dead zone if we're passing through it
     const DEAD_ZONE_MIN = -1.0;
     const DEAD_ZONE_MAX = 0.7;
     let crossedDeadZone = false;
     if (filteredSpeed > DEAD_ZONE_MIN && filteredSpeed < DEAD_ZONE_MAX) {
-        // Check which direction we're moving based on the target
         if (gestureTarget >= DEAD_ZONE_MAX) {
             filteredSpeed = DEAD_ZONE_MAX;
             crossedDeadZone = (prevFilteredSpeed < 0);
@@ -840,7 +987,6 @@ function updateFilteredSpeed() {
     filteredSpeedValue.textContent = filteredSpeed.toFixed(2);
     filteredSpeedBar.value = filteredSpeed;
     
-    // If we crossed the dead zone, restart playback in the new direction
     if (crossedDeadZone && isPlaying) {
         const currentPos = parseFloat(seekBar.value);
         pauseTime = currentPos;
