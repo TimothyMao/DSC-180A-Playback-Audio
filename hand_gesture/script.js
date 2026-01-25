@@ -3,6 +3,8 @@ const SMOOTHING_WINDOW = 5;
 const SPEED_CALCULATION_FRAMES = 10;
 
 let hands, camera;
+let selfieSegmentation; // For background blur
+let segmentationResults = null; // Store segmentation mask
 let previousAngles = [];
 let rotationHistory = [];
 let frameTimestamps = [];
@@ -18,22 +20,25 @@ let handTimeoutTimer = null;
 let isFingerDetected = false;
 
 // Control mode variables
-let controlMode = 'distance'; // 'distance', 'speed', or 'touch'
+let controlMode = 'speed'; // 'distance', 'speed', or 'touch'
 let velocityHistory = [];
 let fingerVelocity = 0;
 
 // Gesture control variables
 let gestureControlEnabled = true;
-let lastFistState = false;
 let lastPalmState = false;
 let gestureDebounceTime = 500;
 let lastGestureToggleTime = 0;
-let fistHoldStartTime = 0;
-let fistHoldDuration = 800;
-let isFistHolding = false;
 let palmHoldStartTime = 0;
-let palmHoldDuration = 800;
+let palmHoldDuration = 300;
 let isPalmHolding = false;
+
+// Rotation gesture for play detection
+let playGestureRotation = 0;
+let playGestureStartTime = 0;
+let playGestureActive = false;
+let playGesturePreviousAngles = []; // Separate array for play gesture
+const PLAY_GESTURE_THRESHOLD = 720; // ~2 full rotations (360° × 2)
 
 // DOM elements for hand recognition
 const videoElement = document.getElementById('inputVideo');
@@ -212,13 +217,31 @@ async function initializeHands() {
         hands.setOptions({
             maxNumHands: 1,
             modelComplexity: 1,
-            minDetectionConfidence: 0.5,
-            minTrackingConfidence: 0.5
+            minDetectionConfidence: 0.7,  // Increased from 0.5 for better detection
+            minTrackingConfidence: 0.7    // Increased from 0.5 for smoother tracking at speed
         });
 
         hands.onResults(onResults);
 
-        console.log("MediaPipe Hands initialized, starting camera...");
+        console.log("Initializing MediaPipe Selfie Segmentation...");
+        
+        if (typeof SelfieSegmentation === 'undefined') {
+            console.warn('Selfie Segmentation not available, proceeding without background blur');
+        } else {
+            selfieSegmentation = new SelfieSegmentation({
+                locateFile: (file) => {
+                    return `https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation/${file}`;
+                }
+            });
+
+            selfieSegmentation.setOptions({
+                modelSelection: 1, // 0 for general, 1 for landscape (better for upper body)
+            });
+
+            selfieSegmentation.onResults(onSegmentationResults);
+        }
+
+        console.log("MediaPipe initialized, starting camera...");
 
         if (typeof Camera === 'undefined') {
             throw new Error('MediaPipe Camera utility failed to load.');
@@ -227,6 +250,9 @@ async function initializeHands() {
         camera = new Camera(videoElement, {
             onFrame: async () => {
                 await hands.send({image: videoElement});
+                if (selfieSegmentation) {
+                    await selfieSegmentation.send({image: videoElement});
+                }
             },
             width: 640,
             height: 480
@@ -268,6 +294,11 @@ async function restartCamera() {
     }
 }
 
+function onSegmentationResults(results) {
+    // Store the segmentation mask for use in onResults
+    segmentationResults = results;
+}
+
 function onResults(results) {
     if (controlMode === 'touch') {
         return;
@@ -278,7 +309,36 @@ function onResults(results) {
     
     canvasCtx.save();
     canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
-    canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+    
+    // If we have segmentation results, apply background blur
+    if (segmentationResults && segmentationResults.segmentationMask) {
+        // Step 1: Draw the clear person first
+        canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+        
+        // Step 2: Use the mask to keep only the person (cut out the person)
+        canvasCtx.globalCompositeOperation = 'destination-in';
+        canvasCtx.drawImage(segmentationResults.segmentationMask, 0, 0, canvasElement.width, canvasElement.height);
+        
+        // Step 3: Create blurred background on a temporary canvas
+        const tempCanvas = document.createElement('canvas');
+        tempCanvas.width = canvasElement.width;
+        tempCanvas.height = canvasElement.height;
+        const tempCtx = tempCanvas.getContext('2d');
+        
+        // Draw blurred version of the entire image
+        tempCtx.filter = 'blur(20px)';
+        tempCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+        
+        // Step 4: Draw blurred background behind the clear person
+        canvasCtx.globalCompositeOperation = 'destination-over';
+        canvasCtx.drawImage(tempCanvas, 0, 0);
+        
+        // Reset composite operation
+        canvasCtx.globalCompositeOperation = 'source-over';
+    } else {
+        // No segmentation, just draw the image normally
+        canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+    }
 
     if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
         const landmarks = results.multiHandLandmarks[0];
@@ -292,11 +352,26 @@ function onResults(results) {
         }
         
         if (gestureControlEnabled) {
+            // Check play/pause gestures for both modes
             detectPlayPauseGesture(landmarks);
+            
+            // Check play gesture when not playing (either never started or manually paused)
+            if (!isPlaying) {
+                detectPlayGesture(landmarks);
+            } else {
+                // Reset play gesture if playing
+                if (playGestureActive) {
+                    console.log(`[${controlMode}] Resetting play gesture - already playing`);
+                    playGestureActive = false;
+                    playGestureRotation = 0;
+                    playGesturePreviousAngles = [];
+                }
+            }
         }
         
         highlightIndexFinger(landmarks);
 
+        // Always detect rotation/velocity for control, regardless of play state
         if (controlMode === 'distance') {
             detectIndexFingerRotation(landmarks);
         } else {
@@ -307,10 +382,18 @@ function onResults(results) {
         fingerStatus.textContent = '❌';
         resetRotationState();
         
-        isFistHolding = false;
-        fistHoldStartTime = 0;
+        // Reset motion prediction
+        lastFingerTip = null;
+        fingerVelocityX = 0;
+        fingerVelocityY = 0;
+        
         isPalmHolding = false;
         palmHoldStartTime = 0;
+        
+        playGestureActive = false;
+        playGestureRotation = 0;
+        playGestureStartTime = 0;
+        playGesturePreviousAngles = [];
         
         setGestureTargetForDrift();
         
@@ -336,7 +419,7 @@ function highlightIndexFinger(landmarks) {
     canvasCtx.arc(
         indexTip.x * canvasElement.width,
         indexTip.y * canvasElement.height,
-        10,
+        12,
         0,
         2 * Math.PI
     );
@@ -363,7 +446,8 @@ function detectIndexFingerRotation(landmarks) {
             }
             speedDisplay.textContent = '0°/s';
             rotationVelocity = 0;
-            if (!filterAnimationFrame && !manuallyPaused) {
+            // Update filtered speed even when paused
+            if (!filterAnimationFrame) {
                 updateFilteredSpeed();
             }
             return;
@@ -411,7 +495,8 @@ function detectIndexFingerRotation(landmarks) {
         if (!manuallyPaused) {
             gestureTarget = navigationSpeed;
         }
-        if (!filterAnimationFrame && !manuallyPaused) {
+        // Update filtered speed even when paused
+        if (!filterAnimationFrame) {
             updateFilteredSpeed();
         }
         return;
@@ -458,7 +543,8 @@ function detectIndexFingerRotation(landmarks) {
                 }
                 speedDisplay.textContent = '0°/s';
                 rotationVelocity = 0;
-                if (!filterAnimationFrame && !manuallyPaused) {
+                // Update filtered speed even when paused
+                if (!filterAnimationFrame) {
                     updateFilteredSpeed();
                 }
             }
@@ -478,8 +564,6 @@ function detectIndexFingerRotation(landmarks) {
 }
 
 function setGestureTargetFromRotation(direction) {
-    if (manuallyPaused) return;
-
     const baseIncrement = 0.05 * params.filtering.gestureAmplitude;
     const maxSpeed = params.navigation.maxSpeed;
     const minSpeed = params.navigation.minSpeed;
@@ -501,6 +585,12 @@ function setGestureTargetFromRotation(direction) {
         speedValue.textContent = navigationSpeed.toFixed(2);
         gestureTarget = navigationSpeed;
         
+        // Auto-start playback only if not manually paused
+        if (!isPlaying && !manuallyPaused && audioBuffer) {
+            startPlayback();
+        }
+        
+        // Update filtered speed even when paused
         if (!filterAnimationFrame) {
             updateFilteredSpeed();
         }
@@ -510,12 +600,14 @@ function setGestureTargetFromRotation(direction) {
 function setGestureTargetForDrift() {
     if (manuallyPaused) return;
 
+    // Set the target for drifting
     if (filteredSpeed > 0) {
         gestureTarget = params.filtering.driftTarget;
     } else {
         gestureTarget = filteredSpeed;
     }
-
+    
+    // Snap input slider to current playback speed, then both will drift together
     navigationSpeed = filteredSpeed;
     rawNavigationSpeed = filteredSpeed;
     speedBar.value = navigationSpeed;
@@ -578,7 +670,8 @@ function detectFingerVelocity(landmarks) {
         detectionStatus.style.background = 'rgba(100, 100, 100, 0.7)';
         currentDirection.innerHTML = '<span>⊙</span>';
 
-        if (!filterAnimationFrame && !manuallyPaused) {
+        // Update filtered speed even when paused
+        if (!filterAnimationFrame) {
             updateFilteredSpeed();
         }
     } else {
@@ -597,15 +690,14 @@ function detectFingerVelocity(landmarks) {
             currentDirection.innerHTML = '<span style="color: #f87171;">↺</span>';
         }
 
-        if (!filterAnimationFrame && !manuallyPaused) {
+        // Update filtered speed even when paused
+        if (!filterAnimationFrame) {
             updateFilteredSpeed();
         }
     }
 }
 
 function setGestureTargetFromVelocity(velocity) {
-    if (manuallyPaused) return;
-
     const VELOCITY_SCALE = 3 * params.filtering.gestureAmplitude;
     const maxSpeed = params.navigation.maxSpeed;
     const minSpeed = params.navigation.minSpeed;
@@ -620,6 +712,7 @@ function setGestureTargetFromVelocity(velocity) {
 
     gestureTarget = navigationSpeed;
     
+    // Update filtered speed even when paused (for slider movement)
     if (!filterAnimationFrame) {
         updateFilteredSpeed();
     }
@@ -655,6 +748,11 @@ function resetRotationState() {
     fingerVelocity = 0;
     angleDisplay.textContent = '0°';
     speedDisplay.textContent = '0°/s';
+    
+    playGestureActive = false;
+    playGestureRotation = 0;
+    playGestureStartTime = 0;
+    playGesturePreviousAngles = [];
 }
 
 function applyDeadZoneMapping(speed) {
@@ -668,98 +766,141 @@ function applyDeadZoneMapping(speed) {
     return speed;
 }
 
-// ========== PLAY/PAUSE GESTURE DETECTION ==========
 function detectPlayPauseGesture(landmarks) {
-    const currentTime = Date.now();
+    if (!gestureControlEnabled) return;
     
-    const isFist = detectFist(landmarks);
+    const currentTime = Date.now();
+    if (currentTime - lastGestureToggleTime < gestureDebounceTime) return;
+    
     const isPalm = detectOpenPalm(landmarks);
     
-    if (isFist) {
-        if (!isPlaying && !isFistHolding) {
-            isFistHolding = true;
-            fistHoldStartTime = currentTime;
-        } else if (!isPlaying && isFistHolding) {
-            const holdDuration = currentTime - fistHoldStartTime;
-            
-            if (holdDuration >= fistHoldDuration) {
-                console.log('Gesture: Fist held - Starting playback');
-                startPlayback();
-                lastGestureToggleTime = currentTime;
-                isFistHolding = false;
-            }
+    if (isPalm && !lastPalmState) {
+        palmHoldStartTime = currentTime;
+        isPalmHolding = true;
+    } else if (isPalm && isPalmHolding) {
+        const holdDuration = currentTime - palmHoldStartTime;
+        
+        if (holdDuration >= palmHoldDuration && isPlaying) {
+            console.log('Gesture: Open palm held - Pausing playback');
+            pausePlayback();
+            lastGestureToggleTime = currentTime;
+            isPalmHolding = false;
         }
-    } else {
-        isFistHolding = false;
-        fistHoldStartTime = 0;
-    }
-    
-    if (isPalm) {
-        if (isPlaying && !isPalmHolding) {
-            isPalmHolding = true;
-            palmHoldStartTime = currentTime;
-        } else if (isPlaying && isPalmHolding) {
-            const holdDuration = currentTime - palmHoldStartTime;
-            
-            if (holdDuration >= palmHoldDuration) {
-                console.log('Gesture: Open palm held - Pausing playback');
-                pausePlayback();
-                lastGestureToggleTime = currentTime;
-                isPalmHolding = false;
-            }
-        }
-    } else {
+    } else if (!isPalm) {
         isPalmHolding = false;
         palmHoldStartTime = 0;
     }
     
-    lastFistState = isFist;
     lastPalmState = isPalm;
 }
 
-function detectFist(landmarks) {
-    const fingersCurled = [
-        landmarks[8].y > landmarks[6].y,
-        landmarks[12].y > landmarks[10].y,
-        landmarks[16].y > landmarks[14].y,
-        landmarks[20].y > landmarks[18].y
-    ];
-    const curledCount = fingersCurled.filter(curled => curled).length;
+function detectPlayGesture(landmarks) {
+    const indexTip = landmarks[8];
+    const currentPos = { x: indexTip.x, y: indexTip.y };
+    const currentTime = Date.now();
     
-    return curledCount >= 3;
-}
-
-function detectOpenPalm(landmarks) {
-    const palmBase = landmarks[0];
-    const wrist = landmarks[0];
-    const middleBase = landmarks[9];
+    if (!playGestureActive) {
+        playGestureActive = true;
+        playGestureRotation = 0;
+        playGestureStartTime = currentTime;
+        playGesturePreviousAngles = [];
+        console.log(`[${controlMode}] Play gesture tracking started`);
+    }
     
-    const fingerTips = [
-        landmarks[4],
-        landmarks[8],
-        landmarks[12],
-        landmarks[16],
-        landmarks[20]
-    ];
+    playGesturePreviousAngles.push(currentPos);
     
-    const palmDx = middleBase.x - wrist.x;
-    const palmDy = middleBase.y - wrist.y;
-    const palmSize = Math.sqrt(palmDx * palmDx + palmDy * palmDy);
+    // Keep last 10 positions for better circular detection
+    if (playGesturePreviousAngles.length > 10) {
+        playGesturePreviousAngles.shift();
+    }
     
-    let extendedCount = 0;
-    const OPEN_PALM_THRESHOLD = palmSize * 1.5;
-    
-    for (const tip of fingerTips) {
-        const dx = tip.x - palmBase.x;
-        const dy = tip.y - palmBase.y;
-        const distance = Math.sqrt(dx * dx + dy * dy);
+    // Need at least 3 points to calculate rotation
+    if (playGesturePreviousAngles.length >= 3) {
+        let frameRotation = 0;
+        let totalRotationDirection = 0; // Track if consistently clockwise or counterclockwise
+        let validSamples = 0;
         
-        if (distance > OPEN_PALM_THRESHOLD) {
-            extendedCount++;
+        // Use the same method as distance mode - calculate cross product of consecutive vectors
+        for (let i = 2; i < playGesturePreviousAngles.length; i++) {
+            const p0 = playGesturePreviousAngles[i - 2];
+            const p1 = playGesturePreviousAngles[i - 1];
+            const p2 = playGesturePreviousAngles[i];
+            
+            const v1x = p1.x - p0.x;
+            const v1y = p1.y - p0.y;
+            const v2x = p2.x - p1.x;
+            const v2y = p2.y - p1.y;
+            
+            const mag1 = Math.sqrt(v1x * v1x + v1y * v1y);
+            const mag2 = Math.sqrt(v2x * v2x + v2y * v2y);
+            
+            // Only count significant movements
+            if (mag1 > 0.01 && mag2 > 0.01) {
+                const crossProduct = v1x * v2y - v1y * v2x;
+                const angularChange = crossProduct / (mag1 * mag2);
+                const angleDegrees = angularChange * 180 / Math.PI; // Keep sign for direction check
+                
+                // Track direction consistency
+                totalRotationDirection += Math.sign(angleDegrees);
+                validSamples++;
+                
+                frameRotation += Math.abs(angleDegrees);
+            }
+        }
+        
+        // Check if motion is consistently in one direction (circular)
+        // If all movements are in the same direction, validSamples will equal abs(totalRotationDirection)
+        const directionConsistency = validSamples > 0 ? Math.abs(totalRotationDirection) / validSamples : 0;
+        
+        // Only count rotation if motion is consistently circular (>80% in same direction)
+        if (directionConsistency > 0.8) {
+            playGestureRotation += frameRotation;
+            
+            if (frameRotation > 5) {
+                console.log(`[${controlMode}] Added ${frameRotation.toFixed(1)}° (total: ${playGestureRotation.toFixed(0)}°, consistency: ${(directionConsistency * 100).toFixed(0)}%)`);
+            }
+        } else {
+            // Random movement detected - reset if consistency is too low
+            if (frameRotation > 10 && directionConsistency < 0.5) {
+                console.log(`[${controlMode}] Non-circular movement detected (consistency: ${(directionConsistency * 100).toFixed(0)}%), resetting`);
+                playGestureRotation = 0;
+            }
+        }
+        
+        // Log progress every 360 degrees
+        const currentFullRotations = Math.floor(playGestureRotation / 360);
+        const prevRotations = Math.floor((playGestureRotation - frameRotation) / 360);
+        if (currentFullRotations > prevRotations) {
+            console.log(`[${controlMode}] Play gesture: ${currentFullRotations} rotation(s) completed (${playGestureRotation.toFixed(0)}°)`);
         }
     }
     
-    return extendedCount >= 4;
+    if (playGestureRotation >= PLAY_GESTURE_THRESHOLD) {
+        const gestureTime = currentTime - playGestureStartTime;
+        const rotationCount = playGestureRotation / 360;
+        
+        // Ensure we have at least 2 full rotations
+        if (rotationCount >= 2 && gestureTime < 5000) {
+            console.log(`[${controlMode}] Gesture: ${rotationCount.toFixed(1)} rotations detected - Starting playback`);
+            startPlayback();
+            playGestureActive = false;
+            playGestureRotation = 0;
+            playGesturePreviousAngles = [];
+            lastGestureToggleTime = currentTime;
+        } else if (gestureTime >= 5000) {
+            console.log(`[${controlMode}] Play gesture timeout - took too long (${gestureTime}ms)`);
+            playGestureActive = false;
+            playGestureRotation = 0;
+            playGesturePreviousAngles = [];
+        }
+    }
+    
+    if (currentTime - playGestureStartTime > 5000) {
+        console.log(`[${controlMode}] Play gesture timeout - resetting (total: ${playGestureRotation.toFixed(0)}°)`);
+        playGestureActive = false;
+        playGestureRotation = 0;
+        playGesturePreviousAngles = [];
+    }
 }
 
 function detectOpenPalm(landmarks) {
@@ -872,16 +1013,12 @@ loadDefaultBtn.addEventListener('click', async () => {
 
 speedBar.addEventListener('input', (e) => {
     let newSpeed = clamp(parseFloat(e.target.value), params.navigation.minSpeed, params.navigation.maxSpeed);
-
     newSpeed = applyDeadZoneMapping(newSpeed);
-
     navigationSpeed = newSpeed;
     rawNavigationSpeed = newSpeed;
     speedValue.textContent = newSpeed.toFixed(2);
-
     gestureTarget = newSpeed;
     manuallyPaused = false;
-
     if (!filterAnimationFrame) {
         updateFilteredSpeed();
     }
@@ -941,7 +1078,6 @@ function updateEffectiveParams() {
     const speed = Math.abs(filteredSpeed);
     const effectiveStep = params.navigation.segmentStep * speed;
     const effectiveInterval = (params.navigation.segmentIntervalMs / 1000) / speed;
-
     effectiveStepDisplay.textContent = effectiveStep.toFixed(2);
     effectiveIntervalDisplay.textContent = (effectiveInterval * 1000).toFixed(0);
 }
@@ -978,28 +1114,25 @@ fadeDurationInput.addEventListener('input', (e) => {
 });
 
 function updateFilteredSpeed() {
-    if (manuallyPaused) {
-        if (filterAnimationFrame) {
-            cancelAnimationFrame(filterAnimationFrame);
-            filterAnimationFrame = null;
-        }
-        return;
-    }
-
     const alpha = isFingerDetected ? params.filtering.alphaFinger : params.filtering.alphaNoFinger;
     updateAlphaDisplay();
 
     const previousTargetSign = Math.sign(previousGestureTarget);
     const currentTargetSign = Math.sign(gestureTarget);
     const targetCrossedDeadZone = (previousTargetSign !== 0 && currentTargetSign !== 0 && previousTargetSign !== currentTargetSign);
-    const targetJumped = Math.abs(gestureTarget - previousGestureTarget) > 1.5;
+    
+    // Check if this is a drift-to-target scenario (when finger is removed)
+    const isDriftingToTarget = !isFingerDetected && gestureTarget === params.filtering.driftTarget;
+    
+    // Only treat as "jump" if it's an actual gesture change, not drifting
+    const targetJumped = !isDriftingToTarget && Math.abs(gestureTarget - previousGestureTarget) > 1.5;
     
     if (targetCrossedDeadZone || targetJumped) {
         filteredSpeed = gestureTarget;
         filteredSpeedValue.textContent = filteredSpeed.toFixed(2);
         filteredSpeedBar.value = filteredSpeed;
         
-        if (isPlaying) {
+        if (isPlaying && !manuallyPaused) {
             const currentPos = parseFloat(seekBar.value);
             pauseTime = currentPos;
             
@@ -1050,7 +1183,14 @@ function updateFilteredSpeed() {
     filteredSpeedValue.textContent = filteredSpeed.toFixed(2);
     filteredSpeedBar.value = filteredSpeed;
     
-    if (crossedDeadZone && isPlaying) {
+    // If drifting (no finger detected), update input slider to match playback slider
+    if (!isFingerDetected && !manuallyPaused) {
+        navigationSpeed = filteredSpeed;
+        speedBar.value = navigationSpeed;
+        speedValue.textContent = navigationSpeed.toFixed(2);
+    }
+    
+    if (crossedDeadZone && isPlaying && !manuallyPaused) {
         const currentPos = parseFloat(seekBar.value);
         pauseTime = currentPos;
         
@@ -1073,7 +1213,7 @@ function updateFilteredSpeed() {
         }
     }
     
-    if (isPlaying) {
+    if (isPlaying && !manuallyPaused) {
         applyFilteredSpeed();
     }
 
@@ -1086,7 +1226,7 @@ function updateFilteredSpeed() {
         filteredSpeed = gestureTarget;
         filteredSpeedValue.textContent = filteredSpeed.toFixed(2);
         filteredSpeedBar.value = filteredSpeed;
-        if (isPlaying) {
+        if (isPlaying && !manuallyPaused) {
             applyFilteredSpeed();
         }
         filterAnimationFrame = null;
@@ -1346,6 +1486,7 @@ function startPlayback() {
 }
 
 function pausePlayback() {
+    console.log(`[${controlMode}] pausePlayback called - setting manuallyPaused = true`);
     manuallyPaused = true;
 
     if (navigationSpeed > 0 && htmlAudioElement.currentTime > 0) {

@@ -89,19 +89,11 @@ h1 {
 }
 
 #inputVideo {
-    display: block;
-    width: 640px;
-    height: 480px;
-    transform: scaleX(-1);
-    background: #000;
-    max-width: 100%;
-    height: auto;
+    display: none;
 }
 
 #outputCanvas {
-    position: absolute;
-    top: 0;
-    left: 0;
+    display: block;
     width: 640px;
     height: 480px;
     transform: scaleX(-1);
@@ -121,6 +113,7 @@ h1 {
     font-weight: bold;
     min-width: 200px;
     text-align: center;
+    z-index: 3;
 }
 
 .gesture-status {
@@ -538,46 +531,6 @@ button {
     .gesture-status {
         grid-template-columns: 1fr;
     }
-}
-/* Right Column: Gesture Instructions */
-.gesture-instructions {
-    background: rgba(255, 255, 255, 0.1);
-    backdrop-filter: blur(10px);
-    border-radius: 15px;
-    padding: 20px;
-    margin-top: 30px;
-    box-shadow: 0 8px 32px rgba(0,0,0,0.2);
-}
-
-.gesture-instructions h3 {
-    color: #ffd700;
-    margin-bottom: 15px;
-}
-
-.gesture-list {
-    list-style: none;
-    padding: 0;
-}
-
-.gesture-list li {
-    padding: 10px 0;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-    display: flex;
-    align-items: center;
-    gap: 10px;
-}
-
-.gesture-list li:last-child {
-    border-bottom: none;
-}
-
-.error-message {
-    background: rgba(248, 113, 113, 0.2);
-    border: 2px solid #f87171;
-    border-radius: 10px;
-    padding: 20px;
-    margin: 20px 0;
-    text-align: center;
 }
 
 @media (max-width: 700px) {

@@ -29,7 +29,7 @@
                             <video id="inputVideo" autoplay muted playsinline></video>
                             <canvas id="outputCanvas"></canvas>
                             <div class="detection-overlay" id="detectionStatus">
-                                <div id="rotationText">No Rotation</div>
+                                <div id="rotationText">Hold Still</div>
                             </div>
                         </div>
                     </div>
@@ -64,13 +64,13 @@
                     <h3>🎛️ Control Mode</h3>
                     <div class="mode-toggle">
                         <label class="toggle-label">
-                            <input type="radio" name="controlMode" value="distance" id="distanceMode" checked>
+                            <input type="radio" name="controlMode" value="distance" id="distanceMode">
                             <span class="radio-custom"></span>
                             <strong>Distance Mode</strong>
                             <span class="mode-desc">Rotation controls speed</span>
                         </label>
                         <label class="toggle-label">
-                            <input type="radio" name="controlMode" value="speed" id="speedMode">
+                            <input type="radio" name="controlMode" value="speed" id="speedMode" checked>
                             <span class="radio-custom"></span>
                             <strong>Speed Mode</strong>
                             <span class="mode-desc">Fingertip velocity controls speed</span>
@@ -81,14 +81,14 @@
                 <!-- Gesture Instructions -->
                 <div class="gesture-instructions">
                     <h3>🤚 Hand Gesture Controls</h3>
-                    <div id="distanceModeInstructions">
+                    <div id="distanceModeInstructions" style="display: none;">
                         <ul class="gesture-list">
                             <li><span class="gesture-icon">👆</span> <strong>Point index finger up</strong> to enable gesture control</li>
                             <li><span class="gesture-icon">↻</span> <strong>Rotate clockwise</strong> for forward playback</li>
                             <li><span class="gesture-icon">↺</span> <strong>Rotate counter-clockwise</strong> for backward playback</li>
                         </ul>
                     </div>
-                    <div id="speedModeInstructions" style="display: none;">
+                    <div id="speedModeInstructions">
                         <ul class="gesture-list">
                             <li><span class="gesture-icon">👆</span> <strong>Point index finger up</strong> to enable gesture control</li>
                             <li><span class="gesture-icon">→</span> <strong>Move finger right</strong> for forward playback</li>
@@ -257,6 +257,7 @@
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation/selfie_segmentation.js" crossorigin="anonymous"></script>
 
     <!-- Load our custom script -->
     <script src="script.js"></script>
