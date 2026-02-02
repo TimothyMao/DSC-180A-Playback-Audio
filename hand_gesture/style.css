@@ -512,38 +512,744 @@ button {
     text-align: center;
 }
 
-/* Responsive Design */
-@media (max-width: 768px) {
-    .sidebar {
-        width: 280px;
-        left: -280px;
-    }
+/* Settings/Parameters Modal - MOBILE ONLY */
+.settings-button {
+    display: none; /* Hidden by default (desktop) */
+}
 
-    #inputVideo, #outputCanvas {
-        width: 100%;
-        height: auto;
-    }
+/* ADD: File Upload Button - HIDDEN BY DEFAULT */
+.file-upload-button {
+    display: none; /* Hidden until file is loaded */
+}
 
-    h1 {
-        font-size: 1.8rem;
-    }
+.settings-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.8);
+    backdrop-filter: blur(10px);
+    z-index: 2000;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+}
 
-    .gesture-status {
-        grid-template-columns: 1fr;
+.settings-modal.active {
+    display: flex;
+}
+
+.settings-content {
+    background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+    border-radius: 20px;
+    padding: 30px;
+    max-width: 600px;
+    width: 100%;
+    max-height: 80vh;
+    overflow-y: auto;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+    position: relative;
+}
+
+.settings-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+    padding-bottom: 15px;
+    border-bottom: 2px solid rgba(255, 255, 255, 0.2);
+}
+
+.settings-header h2 {
+    color: #ffd700;
+    margin: 0;
+}
+
+.close-settings {
+    background: rgba(255, 255, 255, 0.2);
+    border: none;
+    border-radius: 50%;
+    width: 35px;
+    height: 35px;
+    font-size: 24px;
+    cursor: pointer;
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+}
+
+.close-settings:hover {
+    background: rgba(255, 255, 255, 0.3);
+    transform: rotate(90deg);
+}
+
+.settings-section {
+    margin-bottom: 25px;
+}
+
+.settings-section h3 {
+    color: #ffd700;
+    margin-bottom: 15px;
+    font-size: 1.2rem;
+}
+
+/* ======= Touch Zone Styling ====== */
+#touchControlSection {
+    background: rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(10px);
+    border-radius: 15px;
+    padding: 10px;
+    margin-bottom: 10px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+}
+
+#touchControlSection h3 {
+    color: #ffd700;
+    margin-bottom: 15px;
+    margin-top: 0;
+}
+
+#touch-control-area {
+    position: relative;
+    width: 100%;
+    height: 480px; /* Match video height */
+    background: rgba(0,0,0,0.5);
+    border: 2px solid #4ade80;
+    border-radius: 15px;
+    cursor: crosshair;
+    touch-action: none;
+    margin-bottom: 20px;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.4);
+    -webkit-tap-highlight-color: transparent;
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+}
+
+#touch-indicator {
+    position: absolute;
+    width: 60px;
+    height: 60px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.8);
+    pointer-events: none;
+    transition: opacity 0.2s;
+    opacity: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 24px;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+}
+
+#touch-indicator.active {
+    opacity: 1;
+}
+
+.touch-placeholder-text {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    color: rgba(255,255,255,0.3);
+    pointer-events: none;
+    font-size: 1.2em;
+    text-align: center;
+}
+
+.touch-mode-toggle {
+    margin-bottom: 10px;
+    padding: 10px;
+    background: rgba(0,0,0,0.3);
+    border-radius: 8px;
+}
+
+.touch-mode-toggle label {
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+}
+
+.touch-mode-toggle input[type="checkbox"] {
+    margin-right: 10px;
+    width: 18px;
+    height: 18px;
+    cursor: pointer;
+}
+
+.touch-mode-toggle span {
+    font-weight: bold;
+    font-size: 16px;
+}
+
+.touch-zone-labels {
+    margin-top: 5px;
+    font-size: 0.9em;
+    color: #aaa;
+}
+
+.touch-zone-labels span {
+    margin: 0 5px;
+}
+
+.touch-parameter-group {
+    margin-bottom: 10px;
+    padding: 10px;
+    background: rgba(0,0,0,0.2);
+    border-radius: 8px;
+}
+
+.touch-parameter-group label {
+    display: block;
+    font-size: 14px;
+    color: rgba(255, 255, 255, 0.9);
+}
+
+.touch-parameter-group input[type="number"] {
+    width: 70px;
+    padding: 4px 8px;
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.1);
+    color: white;
+    font-size: 14px;
+    margin: 0 5px;
+}
+
+.touch-parameter-group input[type="number"]:focus {
+    outline: none;
+    border-color: #ffd700;
+}
+
+.touch-parameter-group .param-desc {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.7);
+    font-style: italic;
+}
+
+#speed-decay-group {
+    margin-bottom: 10px;
+    padding: 10px;
+    background: rgba(0,0,0,0.2);
+    border-radius: 8px;
+}
+
+#speed-decay-group label {
+    display: block;
+    margin-bottom: 5px;
+    font-size: 14px;
+}
+
+#speed-decay-label {
+    font-weight: bold;
+    color: #4ade80;
+}
+
+#speed-decay-display {
+    width: 100%;
+    height: 6px;
+    border-radius: 3px;
+    background: rgba(255, 255, 255, 0.2);
+    margin: 8px 0;
+}
+
+#speed-decay-display::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: #4ade80;
+    cursor: not-allowed;
+}
+
+/* Fullscreen toggle button - HIDDEN BY DEFAULT (Desktop) */
+.fullscreen-toggle {
+    display: none; /* Hide on desktop */
+}
+
+/* ADD: Hide upload section after file is loaded on mobile */
+.audio-section .upload-section.file-loaded {
+    display: none !important;
+}
+
+/* Audio Loading Indicator */
+.audio-loading-indicator {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 15px;
+    margin-bottom: 15px;
+    background: rgba(74, 222, 128, 0.1);
+    border: 2px solid rgba(74, 222, 128, 0.3);
+    border-radius: 8px;
+    animation: fadeIn 0.3s ease-in;
+}
+
+.loading-spinner {
+    width: 24px;
+    height: 24px;
+    border: 3px solid rgba(74, 222, 128, 0.3);
+    border-top-color: #4ade80;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+
+.loading-text {
+    color: #4ade80;
+    font-size: 0.95em;
+    font-weight: 500;
+}
+
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
     }
 }
 
-@media (max-width: 700px) {
-    #inputVideo, #outputCanvas {
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Disabled state for inputs and buttons */
+.upload-section input:disabled,
+.upload-section button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    pointer-events: none;
+}
+
+/* ========================================
+   MOBILE STYLES START HERE
+   ======================================== */
+
+@media (max-width: 768px) {
+    body {
+        padding: 0;
+        margin: 0;
+        padding-bottom: 400px; /* Space for fixed bottom sections */
+    }
+
+    /* Settings button - SHOW ON MOBILE */
+    .settings-button {
+        display: flex;
+        position: fixed;
+        top: 15px;
+        right: 15px;
+        width: 45px;
+        height: 45px;
+        background: rgba(255, 255, 255, 0.2);
+        backdrop-filter: blur(10px);
+        border: 2px solid rgba(255, 255, 255, 0.3);
+        border-radius: 50%;
+        cursor: pointer;
+        align-items: center;
+        justify-content: center;
+        font-size: 20px;
+        z-index: 1000;
+        transition: all 0.3s;
+        color: white;
+        padding: 10px 10px;
+    }
+
+    .settings-button:hover {
+        background: rgba(255, 255, 255, 0.3);
+        transform: rotate(90deg);
+    }
+    
+    /* ADD: File Upload button - SHOW ON MOBILE */
+    .file-upload-button {
+        display: none; /* Hidden until file is loaded */
+        position: fixed;
+        top: 15px;
+        left: 15px;
+        width: 45px;
+        height: 45px;
+        background: rgba(255, 255, 255, 0.2);
+        backdrop-filter: blur(10px);
+        border: 2px solid rgba(255, 255, 255, 0.3);
+        border-radius: 50%;
+        cursor: pointer;
+        align-items: center;
+        justify-content: center;
+        font-size: 20px;
+        z-index: 1000;
+        transition: all 0.3s;
+        color: white;
+        padding: 10px 10px;
+        border: none;
+    }
+    
+    .file-upload-button.show {
+        display: flex !important;
+    }
+
+    .file-upload-button:hover {
+        background: rgba(255, 255, 255, 0.3);
+        transform: scale(1.1);
+    }
+    
+    /* Hide audio section title on mobile */
+    .audio-section h2 {
+        display: none;
+    }
+    
+    /* Hide parameters sections in MAIN VIEW only - not in modal */
+    .right-column .params-section,
+    .right-column .alpha-section,
+    .how-it-works-section {
+        display: none !important;
+    }
+
+    /* Hide touch controls header and parameters in MAIN VIEW */
+    #touchControlSection > h3,
+    #touchControlSection .touch-parameter-group,
+    #touchControlSection #speed-decay-group,
+    #touchControlSection .touch-zone-labels {
+        display: none !important;
+    }
+
+
+    /* Flatten the two-column structure into a single column */
+    .main-container {
+        display: block;
+        height: auto;
         width: 100%;
+    }
+
+    /* All sections become full-width blocks in a single column */
+    .left-column,
+    .right-column {
+        display: block;
+        width: 100%;
+        flex: none;
+        padding: 0;
+        background: transparent;
+        position: static;
         height: auto;
     }
 
-    h1 {
-        font-size: 1.8rem;
+    .right-column {
+        padding: 15px;
     }
 
-    .gesture-status {
-        grid-template-columns: 1fr;
+    /* Hide elements we don't want on mobile */
+    .left-column h1,
+    .left-column .subtitle,
+    .loading,
+    .gesture-instructions,
+    .gesture-status,
+    .audio-section h2 {
+        display: none;
+    }
+
+    /* Camera section - container for both hand and touch sections */
+    .camera-section {
+        position: fixed;
+        bottom: 50px; /* ADJUST: Distance from bottom - increase to move up, decrease to move down */
+        left: 0;
+        right: 0;
+        width: 100%;
+        height: 350px; /* ADJUST: Total height of the camera/touch section */
+        margin: 0;
+        padding: 0;
+        z-index: 100;
+        background: transparent;
+    }
+
+    /* UNIFIED STYLING: Hand section - takes full space when visible */
+    .hand-section {
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        border-top: 3px solid #4ade80;
+        box-shadow: 0 -5px 20px rgba(0, 0, 0, 0.5);
+        border-radius: 0;
+        display: flex;
+        flex-direction: column;
+        backdrop-filter: blur(10px);
+    }
+
+    .video-container {
+        margin-bottom: 0;
+        flex: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .video-wrapper {
+        width: 100%;
+        height: 100%;
+    }
+
+    #inputVideo,
+    #outputCanvas {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+    }
+
+    /* UNIFIED STYLING: Touch control section - same appearance as hand section */
+    #touchControlSection {
+        position: absolute !important;
+        width: 100%;
+        height: 85%;
+        bottom: 0;
+        border-top: 3px solid #4ade80;
+        box-shadow: 0 -5px 20px rgba(0, 0, 0, 0.5);
+        backdrop-filter: blur(10px);
+        z-index: 101;
+        padding: 10px; /* ADD: Space around the section */
+        margin: 0;
+        border-radius: 20px;
+    }
+
+    /* When touch section is hidden (hand mode), don't take up space */
+    #touchControlSection[style*="display: none"] {
+        display: none !important;
+    }
+
+    /* When touch section is visible (touch mode), show it */
+    #touchControlSection[style*="display: block"],
+    #touchControlSection[style*="display: flex"] {
+        display: flex !important;
+        flex-direction: column;
+    }
+
+    /* Touch section header - minimal, consistent with hand section */
+    #touchControlSection h3 {
+        padding: 10px;
+        margin: 0;
+        font-size: 0.9rem;
+        text-align: center;
+        background: rgba(0, 0, 0, 0.4);
+        color: #ffd700;
+        flex-shrink: 0;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    /* Touch control area - fills space like video container */
+    #touch-control-area {
+        flex: 1 1 auto;
+        height: auto;
+        min-height: 200px; /* ADJUST: Change this to make it taller/shorter */
+        border: 2px solid #4ade80;
+        border-radius: 20px; /* ADD: Rounded corners for better appearance */
+        background: rgba(0, 0, 0, 0.5);
+        box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4);
+        -webkit-tap-highlight-color: transparent;
+        -webkit-touch-callout: none;
+        -webkit-user-select: none;
+        user-select: none;
+    }
+
+
+    /* Compact touch controls */
+    .touch-mode-toggle {
+        padding: 6px 10px;
+        margin: 0;
+        font-size: 12px;
+        flex-shrink: 0;
+        background: rgba(0, 0, 0, 0.4);
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    /* Control mode section - fixed at very bottom */
+    .control-mode-section {
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        width: 100%;
+        height: 50px;
+        background: rgba(15, 15, 15, 0.98);
+        border-top: 2px solid rgba(255, 255, 255, 0.2);
+        box-shadow: 0 -3px 15px rgba(0, 0, 0, 0.5);
+        z-index: 101;
+        padding: 0;
+        margin: 0;
+        border-radius: 0;
+        display: flex !important;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .control-mode-section h3 {
+        display: none;
+    }
+
+    /* Mode toggle - horizontal compact layout */
+    .mode-toggle {
+        flex-direction: row;
+        gap: 0;
+        width: 100%;
+        height: 100%;
+        margin: 0;
+    }
+
+    .toggle-label {
+        flex: 1;
+        padding: 0;
+        margin: 0;
+        height: 100%;
+        background: transparent;
+        border-radius: 0;
+        border: none;
+        border-right: 1px solid rgba(255, 255, 255, 0.1);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+    }
+
+    .toggle-label:last-child {
+        border-right: none;
+    }
+
+    .toggle-label:hover {
+        background: rgba(255, 255, 255, 0.1);
+        transform: none;
+    }
+
+    .toggle-label input[type="radio"]:checked {
+        background: rgba(255, 215, 0, 0.2);
+    }
+
+    .radio-custom {
+        width: 18px;
+        height: 18px;
+    }
+
+    .toggle-label input[type="radio"]:checked + .radio-custom::after {
+        width: 10px;
+        height: 10px;
+    }
+
+    .toggle-label strong {
+        font-size: 13px;
+        flex: none;
+    }
+
+    .mode-desc {
+        display: none;
+    }
+
+    /* Audio section - appears in normal flow */
+    .audio-section {
+        margin-bottom: 15px;
+        padding: 20px;
+    }
+
+    /* All other elements flow naturally in single column */
+    .upload-section,
+    .time-section,
+    .speed-section,
+    .button-section,
+    .params-section {
+        margin-bottom: 15px;
+    }
+
+    .detection-overlay {
+        font-size: 1rem;
+        padding: 8px 12px;
+    }
+
+    /* Fullscreen toggle button - SHOW when touch section is visible */
+    .fullscreen-toggle {
+        display: none; /* Hidden by default */
+        position: absolute;
+        top: 10px;
+        left: 10px;
+        width: 40px;
+        height: 40px;
+        background: rgba(0, 0, 0, 0.7);
+        backdrop-filter: blur(10px);
+        border: 2px solid rgba(255, 255, 255, 0.3);
+        border-radius: 10px;
+        cursor: pointer;
+        align-items: center;
+        justify-content: center;
+        font-size: 20px;
+        z-index: 1000;
+        transition: all 0.3s;
+        color: white;
+        padding: 0;
+    }
+
+    .fullscreen-toggle:hover {
+        background: rgba(0, 0, 0, 0.85);
+        transform: scale(1.1);
+    }
+
+    /* Show fullscreen button when touch section is visible */
+    #touchControlSection:not([style*="display: none"]) .fullscreen-toggle,
+    #touchControlSection[style*="display: block"] .fullscreen-toggle,
+    #touchControlSection[style*="display: flex"] .fullscreen-toggle {
+        display: flex !important;
+    }
+
+    /* Touch control section - fullscreen mode */
+    #touchControlSection.fullscreen {
+        position: fixed !important;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        width: 100vw !important;
+        height: 100vh !important;
+        z-index: 2000;
+        padding: 0;
+        margin: 0;
+        border-radius: 0;
+        border: none;
+    }
+
+    #touchControlSection.fullscreen #touch-control-area {
+        border-radius: 0;
+        height: 100%;
+        min-height: 100vh;
+    }
+
+    /* Hide mode toggle in fullscreen */
+    #touchControlSection.fullscreen .touch-mode-toggle {
+        position: fixed;
+        bottom: 60px;
+        left: 0;
+        right: 0;
+        background: rgba(0, 0, 0, 0.8);
+        backdrop-filter: blur(10px);
+        border-top: 1px solid rgba(255, 255, 255, 0.2);
+        z-index: 2001;
+    }
+
+    /* Fullscreen mode - change arrow direction */
+    #touchControlSection.fullscreen .fullscreen-toggle {
+        top: 20px;
+        right: 20px;
+    }
+}
+
+/* MOBILE: Smaller screens */
+@media (max-width: 700px) {
+    h1 {
+        font-size: 1.8rem;
     }
 }

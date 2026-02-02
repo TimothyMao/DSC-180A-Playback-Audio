@@ -54,6 +54,18 @@ const loadingMessage = document.getElementById('loadingMessage');
 const errorMessage = document.getElementById('errorMessage');
 const handSection = document.getElementById('handSection');
 
+// Volume control variables
+let currentVolume = 1.0;
+let volumeHistory = [];
+const VOLUME_SMOOTHING_FRAMES = 5;
+let lastVolumeUpdateTime = 0;
+let volumeUpdateInterval = 100;
+
+// Volume UI elements
+const volumeStatus = document.getElementById('volumeStatus');
+const volumeIcon = document.getElementById('volumeIcon');
+const volumeText = document.getElementById('volumeText');
+
 // Control mode toggle elements
 const distanceModeRadio = document.getElementById('distanceMode');
 const speedModeRadio = document.getElementById('speedMode');
@@ -127,6 +139,11 @@ const filteredSpeedValue = document.getElementById('filteredSpeedValue');
 const currentTimeDisplay = document.getElementById('currentTime');
 const durationDisplay = document.getElementById('duration');
 const loadDefaultBtn = document.getElementById('loadDefaultBtn');
+const youtubeUrlInput = document.getElementById('youtubeUrlInput');
+const loadYouTubeBtn = document.getElementById('loadYouTubeBtn');
+const audioLoadingIndicator = document.getElementById('audioLoadingIndicator');
+const htmlVideoElement = document.getElementById('htmlVideoElement');
+const videoContainer = document.getElementById('videoContainer');
 
 // Alpha control elements
 const alphaFingerInput = document.getElementById('alphaFingerInput');
@@ -152,6 +169,850 @@ const effectiveIntervalDisplay = document.getElementById('effectiveInterval');
 
 const MIN_PLAYBACK_RATE = 0.0625;
 const MAX_PLAYBACK_RATE = 16.0;
+
+// ========== TRANSCRIPTION VARIABLES ==========
+const transcribeBtn = document.getElementById('transcribeBtn');
+const transcriptionStatus = document.getElementById('transcriptionStatus');
+const transcriptionStatusText = document.getElementById('transcriptionStatusText');
+const transcriptionResult = document.getElementById('transcriptionResult');
+const transcriptionText = document.getElementById('transcriptionText');
+const copyTranscriptBtn = document.getElementById('copyTranscriptBtn');
+const TRANSCRIBE_API = 'http://localhost:3000/api/transcribe';
+
+let currentTranscript = null;
+let currentTranscriptWords = [];
+
+function enableTranscription() {
+    console.log('enableTranscription called!');
+    console.log('transcribeBtn:', transcribeBtn);
+    if (transcribeBtn) {
+        transcribeBtn.disabled = false;
+        console.log('Button enabled!');
+    } else {
+        console.log('transcribeBtn not found!');
+    }
+}
+
+// ========== SMART SCRUB VARIABLES ==========
+let smartScrubEnabled = false;
+let smartScrubActive = false;
+let isSmartScrubPaused = false;
+let smartScrubTimer = null;
+let informativeWords = [];
+let allTranscriptWords = [];
+let currentWordIndex = 0;
+let manualThresholdPercentile = null;
+let hasUserAdjustedThreshold = false;
+let userIntervalMs = 0;
+let wordPlaybackSpeed = 1.0;
+
+const SMART_SCRUB_SPEED_THRESHOLD = 2.0;
+const WORD_OVERLAP_MS = 100;
+let wordHowl = null;
+let wordHowlUrl = null;
+
+// Smart scrub DOM elements
+const smartScrubToggle = document.getElementById('smartScrubToggle');
+const smartScrubControls = document.getElementById('smartScrubControls');
+const thresholdSlider = document.getElementById('thresholdSlider');
+const thresholdLabel = document.getElementById('thresholdLabel');
+const intervalSlider = document.getElementById('intervalSlider');
+const intervalLabel = document.getElementById('intervalLabel');
+const wordSpeedSlider = document.getElementById('wordSpeedSlider');
+const wordSpeedLabel = document.getElementById('wordSpeedLabel');
+const keywordDisplay = document.getElementById('keywordDisplay');
+const pauseSmartScrubBtn = document.getElementById('pauseSmartScrubBtn');
+
+// Common words to filter out
+const commonWords = new Set([
+    "the", "and", "is", "in", "on", "it", "of", "to", "a", "an", "i", "you", 
+    "that", "this", "he", "she", "they", "we", "for", "with", "as", "at", 
+    "by", "from", "but", "or", "not", "be", "was", "were", "are", "have", 
+    "has", "had", "do", "does", "did", "so", "if", "no", "yes", "all", "any",
+    "there", "here", "when", "where", "what", "which", "who", "whom", "why", 
+    "how", "my", "your", "his", "her", "its", "our", "their", "me", "him", 
+    "them", "us", "one", "about", "like", "just", "more", "some", "out", "up", 
+    "down", "now", "then", "also", "than", "too", "very", "can", "will", 
+    "would", "should", "could", "may", "might", "must", "go", "get", "got"
+]);
+
+// ========== SMART SCRUB FUNCTIONS ==========
+
+// Length & Rarity-based word scoring (from your transcription file)
+function selectInformativeWordsTFIDF(words, speed = 1, overridePercentile = null) {
+    if (!Array.isArray(words) || words.length === 0) return [];
+
+    const alpha = /[a-z]/i;
+
+    // Convert words to tokens and filter common words
+    const tokens = words.map(w => ({
+        text: (w.text || '').toLowerCase().replace(/[^a-z'\-]/gi, ''),
+        start: w.start,
+        end: w.end
+    })).filter(w => w.text && alpha.test(w.text) && !commonWords.has(w.text));
+
+    if (tokens.length === 0) return [];
+
+    // Calculate frequency map
+    const freq = new Map();
+    for (const t of tokens) {
+        freq.set(t.text, (freq.get(t.text) || 0) + 1);
+    }
+
+    // Helper: calculate median
+    const median = (arr) => {
+        if (!arr.length) return 0;
+        const a = [...arr].sort((x, y) => x - y);
+        const mid = Math.floor(a.length / 2);
+        return a.length % 2 ? a[mid] : (a[mid - 1] + a[mid]) / 2;
+    };
+
+    const lengths = tokens.map(t => t.text.length);
+    const freqs = Array.from(freq.values());
+
+    const medLen = Math.max(1, median(lengths));
+    const medFreq = Math.max(1, median(freqs));
+
+    const lenWeight = 1.15;
+    const rarityWeight = 1.35;
+
+    // Calculate scores for each unique word
+    const wordScores = new Map();
+    for (const [word, f] of freq.entries()) {
+        const len = word.length;
+        const lengthFactor = Math.pow(Math.max(0.6, len / medLen), lenWeight);
+        const rarityRatio = medFreq / Math.max(1, f);
+        const rarityFactor = Math.pow(Math.log1p(rarityRatio), rarityWeight);
+        const raw = lengthFactor * rarityFactor;
+        const score = Math.sqrt(raw);
+        wordScores.set(word, score);
+    }
+
+    // Get all scores and sort
+    const scores = Array.from(wordScores.values()).filter(v => isFinite(v) && v > 0);
+    if (scores.length === 0) {
+        return tokens.map(({ text, start, end }) => ({ text, start, end }));
+    }
+    scores.sort((a, b) => a - b);
+
+    // Determine percentile threshold
+    let p;
+    if (overridePercentile !== null && overridePercentile >= 0.50 && overridePercentile <= 0.95) {
+        p = overridePercentile;
+    } else {
+        // Auto-adjust based on speed
+        const s = Math.max(1, Math.min(6, speed));
+        p = 0.82 - 0.06 * (s - 2);
+        p = Math.max(0.60, Math.min(0.88, p));
+    }
+
+    const idx = Math.floor(p * (scores.length - 1));
+    const threshold = scores[idx];
+
+    // Filter words by threshold and sort by time
+    const informative = tokens
+        .map(t => ({ ...t, score: wordScores.get(t.text) || 0 }))
+        .filter(t => t.score >= threshold)
+        .sort((a, b) => a.start - b.start);
+
+    console.log(`Selected ${informative.length} informative words from ${words.length} total (threshold: ${(p * 100).toFixed(0)}th percentile)`);
+
+    return informative.map(({ text, start, end }) => ({ text, start, end }));
+}
+
+function recalcInformative(resetIndexToCurrent = true) {
+    if (allTranscriptWords.length === 0) return;
+    
+    const currentSpeed = Math.abs(filteredSpeed);
+    informativeWords = selectInformativeWordsTFIDF(
+        allTranscriptWords,
+        currentSpeed,
+        hasUserAdjustedThreshold ? manualThresholdPercentile : null
+    );
+    
+    if (resetIndexToCurrent) {
+        realignNextIndexTo(parseFloat(seekBar.value));
+    }
+    
+    console.log(`Recalculated with speed ${currentSpeed.toFixed(2)}x: ${informativeWords.length} keywords`);
+}
+
+function realignNextIndexTo(timeSec) {
+    currentWordIndex = 0;
+    while (currentWordIndex < informativeWords.length && 
+           informativeWords[currentWordIndex].start <= timeSec) {
+        currentWordIndex++;
+    }
+}
+
+function startSmartScrub() {
+    if (informativeWords.length === 0 || !audioBuffer) {
+        console.warn('Cannot start smart scrub: no keywords or audio buffer');
+        return;
+    }
+    
+    console.log('Starting smart scrub mode...');
+    smartScrubActive = true;
+    isSmartScrubPaused = false;
+    htmlAudioElement.pause();
+    if (htmlVideoElement && videoContainer && videoContainer.style.display !== 'none') {
+        htmlVideoElement.pause();
+    }
+    
+    activeSources.forEach((source) => {
+        try { source.stop(); } catch (e) {}
+    });
+    activeSources.clear();
+    if (scheduleTimeout) {
+        clearTimeout(scheduleTimeout);
+        scheduleTimeout = null;
+    }
+
+    const currentTime = parseFloat(seekBar.value);
+    const isReverse = filteredSpeed < 0;
+    
+    if (isReverse) {
+        // Start from the word BEFORE current position
+        currentWordIndex = informativeWords.length - 1;
+        while (currentWordIndex >= 0 && 
+               informativeWords[currentWordIndex].start >= currentTime) {
+            currentWordIndex--;
+        }
+    } else {
+        // Start from the word AFTER current position
+        realignNextIndexTo(currentTime);
+    }
+    
+    console.log(`Starting from keyword ${currentWordIndex}/${informativeWords.length} at time ${currentTime}s (reverse: ${isReverse})`);
+    
+    if (pauseSmartScrubBtn) {
+        pauseSmartScrubBtn.style.display = 'inline-block';
+        pauseSmartScrubBtn.textContent = 'Pause Smart Scrub';
+    }
+    if (keywordDisplay) {
+        keywordDisplay.textContent = 'Smart scrub active...';
+    }
+    
+    playNextKeyword();
+}
+
+function playNextKeyword() {
+    if (!smartScrubActive) return;
+    
+    if (isSmartScrubPaused) {
+        smartScrubTimer = setTimeout(playNextKeyword, 100);
+        return;
+    }
+    const isReverse = filteredSpeed < 0;
+    
+    if (isReverse) {
+        // Going backwards
+        if (currentWordIndex < 0) {
+            console.log('Reached beginning of keywords');
+            stopSmartScrub();
+            return;
+        }
+    } else {
+        // Going forwards
+        if (currentWordIndex >= informativeWords.length) {
+            console.log('Reached end of keywords');
+            stopSmartScrub();
+            return;
+        }
+    }
+    
+    const word = informativeWords[currentWordIndex];
+
+    const PRE_ROLL_SEC = 0.05;
+    const POST_ROLL_SEC = 0.05;
+    
+    const startTime = word.start;
+    const adjustedStartTime = Math.max(0, startTime - PRE_ROLL_SEC);
+    
+    let wordDurationMs;
+    if (typeof word.end === 'number' && word.end > word.start) {
+        wordDurationMs = (word.end - word.start) * 1000 + (PRE_ROLL_SEC + POST_ROLL_SEC) * 1000;
+    } else {
+        wordDurationMs = 400;
+    }
+    
+    if (keywordDisplay) {
+        keywordDisplay.textContent = word.text;
+    }
+    
+    highlightWord(word);
+    
+    pauseTime = startTime;
+    seekBar.value = startTime;
+    currentTimeDisplay.textContent = formatTime(startTime);
+    
+    try {
+        htmlAudioElement.currentTime = startTime;
+        if (htmlVideoElement && videoContainer && videoContainer.style.display !== 'none') {
+            htmlVideoElement.currentTime = startTime;
+        }
+    } catch (e) {}
+
+    playSmartWordSegment(adjustedStartTime, wordDurationMs);
+    
+    const getIntervalMs = () => {
+        if (userIntervalMs !== null && userIntervalMs > 0) return userIntervalMs;
+        const speed = Math.abs(filteredSpeed);
+        return Math.max(0, 700 / Math.max(0.1, speed - 1.5));
+    };
+    
+    const getOverlapMs = () => {
+        const intervalMs = getIntervalMs();
+        return Math.max(0, WORD_OVERLAP_MS * (1 - intervalMs / 500));
+    };
+    
+    const gapMs = getIntervalMs();
+    const overlapMs = getOverlapMs();
+    const effectiveWaitMs = Math.max(50, (wordDurationMs + gapMs - overlapMs) / wordPlaybackSpeed);
+    
+    if (isReverse) {
+        currentWordIndex--;  // Go backwards
+    } else {
+        currentWordIndex++;  // Go forwards
+    }
+    
+    smartScrubTimer = setTimeout(playNextKeyword, effectiveWaitMs);
+}
+
+function stopSmartScrub() {
+    console.log('Stopping smart scrub mode...');
+    smartScrubActive = false;
+    isSmartScrubPaused = false;
+    
+    if (smartScrubTimer) {
+        clearTimeout(smartScrubTimer);
+        smartScrubTimer = null;
+    }
+    
+    // Stop all word players (check if pool exists first)
+    if (wordPlayers && wordPlayers.length > 0) {
+        wordPlayers.forEach(player => {
+            try {
+                player.pause();
+            } catch (e) {}
+        });
+    }
+    
+    unhighlightAllWords();
+    
+    if (pauseSmartScrubBtn) {
+        pauseSmartScrubBtn.style.display = 'none';
+    }
+    if (keywordDisplay) {
+        keywordDisplay.textContent = 'No keyword playing';
+    }
+    
+    // Resume normal playback if it should be playing
+    if (isPlaying && !manuallyPaused) {
+        const currentPos = parseFloat(seekBar.value);
+        if (filteredSpeed >= 0) {
+            htmlAudioElement.currentTime = currentPos;
+            htmlAudioElement.playbackRate = Math.abs(filteredSpeed);
+            htmlAudioElement.play().catch(() => {});
+            
+            if (htmlVideoElement && videoContainer && videoContainer.style.display !== 'none') {
+                htmlVideoElement.currentTime = currentPos;
+                htmlVideoElement.playbackRate = Math.abs(filteredSpeed);
+                htmlVideoElement.play().catch(() => {});
+            }
+        } else {
+            playReverseChunk(currentPos);
+        }
+    }
+}
+
+function pauseSmartScrubPlayback() {
+    if (!smartScrubActive) return;
+    
+    if (isSmartScrubPaused) {
+        isSmartScrubPaused = false;
+        if (pauseSmartScrubBtn) {
+            pauseSmartScrubBtn.textContent = 'Pause Smart Scrub';
+        }
+        console.log('Smart scrub resumed');
+    } else {
+        isSmartScrubPaused = true;
+        if (pauseSmartScrubBtn) {
+            pauseSmartScrubBtn.textContent = 'Resume Smart Scrub';
+        }
+        console.log('Smart scrub paused');
+    }
+}
+
+function highlightWord(word) {
+    unhighlightAllWords();
+    const wordElements = document.querySelectorAll('.transcript-word');
+    wordElements.forEach(el => {
+        const wordTime = parseFloat(el.getAttribute('data-time'));
+        if (Math.abs(wordTime - word.start) < 0.1) {
+            el.style.background = 'rgba(255, 215, 0, 0.6)';
+            el.style.fontWeight = 'bold';
+            el.style.transform = 'scale(1.05)';
+        }
+    });
+}
+
+function unhighlightAllWords() {
+    const wordElements = document.querySelectorAll('.transcript-word');
+    wordElements.forEach(el => {
+        el.style.background = 'transparent';
+        el.style.fontWeight = 'normal';
+        el.style.transform = 'scale(1)';
+    });
+}
+
+// ========== WORD PLAYER POOL (Web Audio API with gain nodes) ==========
+
+const wordPlayers = [];
+const wordPlayerGainNodes = [];
+const wordPlayerMediaSources = [];
+let wordPlayerPoolSize = 3;
+let wordPlayerPoolIndex = 0;
+
+function ensureWordPlayerPoolInitialized() {
+    if (wordPlayers.length > 0) return;
+    
+    // Create initial player (will be cloned)
+    const initialPlayer = new Audio();
+    initialPlayer.preservesPitch = true;
+    initialPlayer.mozPreservesPitch = true;
+    initialPlayer.webkitPreservesPitch = true;
+    initialPlayer.volume = 1.0;
+    wordPlayers.push(initialPlayer);
+}
+
+function resizeWordPlayerPool(newSize) {
+    const size = Math.max(1, Math.min(6, Math.floor(newSize || 3)));
+    ensureWordPlayerPoolInitialized();
+    while (wordPlayers.length < size) {
+        const clone = wordPlayers[0].cloneNode();
+        clone.preservesPitch = true;
+        clone.mozPreservesPitch = true;
+        clone.webkitPreservesPitch = true;
+        wordPlayers.push(clone);
+    }
+
+    // Remove extra players
+    while (wordPlayers.length > size) {
+        const removed = wordPlayers.pop();
+        const g = wordPlayerGainNodes.pop();
+        const m = wordPlayerMediaSources.pop();
+        try { if (m) m.disconnect(); } catch {}
+        try { if (g) g.disconnect(); } catch {}
+    }
+
+    wordPlayerPoolSize = size;
+    wordPlayerPoolIndex = wordPlayerPoolIndex % wordPlayerPoolSize;
+
+    // Initialize Web Audio graph if needed
+    if (!audioContext) {
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    }
+
+    // Rewire gain/media sources for any newly added players
+    if (audioContext && wordPlayerGainNodes.length < wordPlayers.length) {
+        for (let idx = wordPlayerGainNodes.length; idx < wordPlayers.length; idx++) {
+            const p = wordPlayers[idx];
+            try {
+                const g = audioContext.createGain();
+                const m = audioContext.createMediaElementSource(p);
+                m.connect(g);
+                g.connect(audioContext.destination);
+                g.gain.value = 0;
+                wordPlayerGainNodes[idx] = g;
+                wordPlayerMediaSources[idx] = m;
+            } catch (e) {
+                console.warn('Could not create media source for player', idx, e);
+            }
+        }
+    }
+}
+
+function initWordPlayerPool() {
+    if (wordPlayerGainNodes.length > 0) return; // Already initialized
+    
+    console.log('Initializing word player pool with Web Audio...');
+    
+    // Ensure audio context exists
+    if (!audioContext) {
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    
+    if (audioContext.state === 'suspended') {
+        audioContext.resume().catch(() => {});
+    }
+    
+    ensureWordPlayerPoolInitialized();
+    resizeWordPlayerPool(wordPlayerPoolSize);
+    
+    console.log(`Word player pool initialized: ${wordPlayers.length} players`);
+}
+
+// ========== WORD PLAYBACK FUNCTIONS ==========
+
+function playSmartWordSegment(startSec, durationMs) {
+    // Try Howler first (smoothest), fallback to audio element
+    if (playWordWithHowler(startSec, durationMs)) return true;
+    return playWordWithAudioElement(startSec, durationMs);
+}
+
+function playWordWithHowler(startSec, durationMs) {
+    if (!wordHowl || wordHowl.state() !== 'loaded') return false;
+
+    try {
+        const baseFadeMs = 180;
+        const fadeMs = baseFadeMs;
+        const actualDurationMs = durationMs;
+        const PRE_ROLL_SEC = 0.05;
+        const seekTarget = Math.max(0, startSec - PRE_ROLL_SEC);
+
+        const id = wordHowl.play();
+        
+        wordHowl.rate(1.0, id);
+        wordHowl.volume(0, id);
+        wordHowl.seek(seekTarget, id);
+        wordHowl.fade(0, 1, fadeMs, id);
+
+        setTimeout(() => {
+            wordHowl.fade(1, 0, fadeMs, id);
+        }, actualDurationMs);
+
+        setTimeout(() => {
+            try { wordHowl.stop(id); } catch {}
+        }, actualDurationMs + fadeMs + 30);
+
+        return true;
+    } catch (e) {
+        console.error('Howler playback error', e);
+        return false;
+    }
+}
+
+function playWordWithAudioElement(startSec, durationMs) {
+    // Initialize if needed
+    if (!audioContext || wordPlayerGainNodes.length === 0) {
+        initWordPlayerPool();
+    }
+    
+    if (audioContext && audioContext.state === 'suspended') {
+        audioContext.resume().catch(() => {});
+    }
+    
+    try {
+        const idx = wordPlayerPoolIndex % wordPlayers.length;
+        wordPlayerPoolIndex++;
+        const player = wordPlayers[idx];
+        const g = wordPlayerGainNodes[idx];
+
+        if (!g) {
+            console.warn('No gain node for player', idx);
+            return false;
+        }
+
+        const baseFadeMs = 240;
+        const minFadeMs = 12;
+        const fadeInMs = Math.max(minFadeMs, baseFadeMs / wordPlaybackSpeed);
+        const fadeOutMs = Math.max(minFadeMs, baseFadeMs / wordPlaybackSpeed);
+        const fadeIn = fadeInMs / 1000;
+        const fadeOut = fadeOutMs / 1000;
+        const now = audioContext.currentTime;
+
+        g.gain.cancelScheduledValues(now);
+        g.gain.setValueAtTime(0, now);
+        
+        player.preservesPitch = true;
+        player.mozPreservesPitch = true;
+        player.webkitPreservesPitch = true;
+        player.playbackRate = wordPlaybackSpeed;
+
+        const seekTarget = Math.max(0, startSec);
+        player.pause();
+        player.currentTime = seekTarget;
+
+        const actualDurationMs = durationMs / wordPlaybackSpeed;
+        const totalDurationMs = actualDurationMs + fadeInMs + fadeOutMs;
+
+        const playPromise = player.play();
+        if (playPromise !== undefined) {
+            playPromise.then(() => {
+                const playNow = audioContext.currentTime;
+                g.gain.cancelScheduledValues(playNow);
+                g.gain.setValueAtTime(0, playNow);
+                g.gain.linearRampToValueAtTime(1, playNow + fadeIn);
+
+                const fadeStartTime = playNow + (actualDurationMs / 1000);
+                g.gain.setValueAtTime(1, fadeStartTime);
+                g.gain.linearRampToValueAtTime(0, fadeStartTime + fadeOut);
+            }).catch(e => console.error('Failed to play word:', e));
+        }
+
+        if (player._wordTimeout) clearTimeout(player._wordTimeout);
+        player._wordTimeout = setTimeout(() => {
+            try {
+                player.pause();
+                g.gain.cancelScheduledValues(audioContext.currentTime);
+                g.gain.setValueAtTime(0, audioContext.currentTime);
+            } catch {}
+            player._wordTimeout = null;
+        }, totalDurationMs + 10);
+        
+        return true;
+    } catch (e) {
+        console.error('Error playing word with audio element:', e);
+        return false;
+    }
+}
+
+// ========== SMART SCRUB EVENT LISTENERS ==========
+
+if (smartScrubToggle) {
+    smartScrubToggle.addEventListener('change', (e) => {
+        smartScrubEnabled = e.target.checked;
+        console.log('Smart scrub mode:', smartScrubEnabled ? 'enabled' : 'disabled');
+        
+        if (!smartScrubEnabled && smartScrubActive) {
+            stopSmartScrub();
+        }
+    });
+}
+
+if (thresholdSlider) {
+    thresholdSlider.addEventListener('input', () => {
+        const val = parseInt(thresholdSlider.value, 10);
+        manualThresholdPercentile = val / 100;
+        thresholdLabel.textContent = `${val}th percentile`;
+        hasUserAdjustedThreshold = true;
+        recalcInformative(false);
+    });
+}
+
+if (intervalSlider) {
+    intervalSlider.addEventListener('input', () => {
+        const val = parseInt(intervalSlider.value, 10);
+        userIntervalMs = val;
+        intervalLabel.textContent = `${val}ms`;
+    });
+}
+
+if (wordSpeedSlider) {
+    wordSpeedSlider.addEventListener('input', () => {
+        const val = parseFloat(wordSpeedSlider.value);
+        wordPlaybackSpeed = val;
+        wordSpeedLabel.textContent = `${val.toFixed(1)}x`;
+    });
+}
+
+if (pauseSmartScrubBtn) {
+    pauseSmartScrubBtn.addEventListener('click', pauseSmartScrubPlayback);
+}
+
+// ========== TRANSCRIPTION FUNCTIONS ==========
+async function transcribeAudio() {
+    if (!htmlAudioElement.src) {
+        alert('Please load an audio file first');
+        return;
+    }
+
+    try {
+        transcriptionStatus.style.display = 'block';
+        transcriptionStatusText.textContent = 'Uploading and transcribing audio... This may take a few minutes.';
+        transcribeBtn.disabled = true;
+        transcriptionResult.style.display = 'none';
+
+        const audioUrl = htmlAudioElement.src;
+        
+        // Check if it's a local blob URL or localhost URL
+        if (audioUrl.startsWith('blob:') || audioUrl.includes('localhost')) {
+            // For local/blob URLs, we need to upload the file data
+            const response = await fetch(audioUrl);
+            const blob = await response.blob();
+            
+            // Create form data
+            const formData = new FormData();
+            formData.append('audio', blob, 'audio.mp3');
+            
+            const uploadResponse = await fetch('http://localhost:3000/api/transcribe-upload', {
+                method: 'POST',
+                body: formData
+            });
+
+            if (!uploadResponse.ok) {
+                const error = await uploadResponse.json();
+                throw new Error(error.error || 'Transcription failed');
+            }
+
+            const result = await uploadResponse.json();
+            currentTranscript = result.text;
+            currentTranscriptWords = result.words || [];
+            
+            displayTranscript(result.text, result.words);
+            transcriptionResult.style.display = 'block';
+            transcriptionStatus.style.display = 'none';
+            
+        } else {
+            // For public URLs (YouTube, etc)
+            const response = await fetch(TRANSCRIBE_API, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ audioUrl })
+            });
+
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.error || 'Transcription failed');
+            }
+
+            const result = await response.json();
+            currentTranscript = result.text;
+            currentTranscriptWords = result.words || [];
+            
+            displayTranscript(result.text, result.words);
+            transcriptionResult.style.display = 'block';
+            transcriptionStatus.style.display = 'none';
+        }
+
+    } catch (error) {
+        console.error('Transcription error:', error);
+        transcriptionStatusText.textContent = `Error: ${error.message}`;
+        setTimeout(() => {
+            transcriptionStatus.style.display = 'none';
+        }, 5000);
+    } finally {
+        transcribeBtn.disabled = false;
+    }
+}
+
+function displayTranscript(text, words) {
+    if (!words || words.length === 0) {
+        transcriptionText.innerHTML = `<p>${text}</p>`;
+        return;
+    }
+    allTranscriptWords = words;
+    
+    // Calculate initial set of informative words
+    const currentSpeed = Math.abs(filteredSpeed) || 1;
+    informativeWords = selectInformativeWordsTFIDF(words, currentSpeed);
+    
+    console.log(`Calculated ${informativeWords.length} informative words from ${words.length} total`);
+    
+    // Show smart scrub controls
+    if (smartScrubControls) {
+        smartScrubControls.style.display = 'block';
+        console.log('Smart scrub controls shown!');
+    } else {
+        console.error('smartScrubControls element not found!');
+    }
+
+    // Format with clickable timestamps
+    let html = '<div style="white-space: pre-wrap;">';
+    
+    words.forEach((word, index) => {
+        const startTime = (word.start).toFixed(2);
+        const wordText = word.text || '';
+        
+        // Make each word clickable to seek to that position
+        html += `<span class="transcript-word" data-time="${word.start}" style="cursor: pointer; padding: 2px; border-radius: 3px; transition: background 0.2s;" onmouseover="this.style.background='rgba(74,222,128,0.3)'" onmouseout="this.style.background='transparent'" onclick="seekToTime(${word.start})">${wordText}</span> `;
+        
+        // Add line break every ~15 words for readability
+        if ((index + 1) % 15 === 0) {
+            html += '<br>';
+        }
+    });
+    
+    html += '</div>';
+    transcriptionText.innerHTML = html;
+}
+
+function seekToTime(timeInSeconds) {
+    if (audioBuffer) {
+        pauseTime = timeInSeconds;
+        seekBar.value = timeInSeconds;
+        currentTimeDisplay.textContent = formatTime(timeInSeconds);
+        
+        if (isPlaying) {
+            stopPlayback();
+            setTimeout(() => startPlayback(), 100);
+        }
+    }
+}
+
+// Make seekToTime globally available
+window.seekToTime = seekToTime;
+
+// Copy transcript to clipboard
+if (copyTranscriptBtn) {
+    copyTranscriptBtn.addEventListener('click', () => {
+        if (currentTranscript) {
+            navigator.clipboard.writeText(currentTranscript).then(() => {
+                copyTranscriptBtn.textContent = '✓ Copied!';
+                setTimeout(() => {
+                    copyTranscriptBtn.textContent = '📋 Copy';
+                }, 2000);
+            }).catch(err => {
+                console.error('Failed to copy:', err);
+                alert('Failed to copy to clipboard');
+            });
+        }
+    });
+}
+
+// Event listener for transcribe button
+if (transcribeBtn) {
+    transcribeBtn.addEventListener('click', transcribeAudio);
+}
+
+// ========== AUDIO LOADING STATE MANAGEMENT ==========
+function showAudioLoading(message = 'Loading audio...') {
+    if (audioLoadingIndicator) {
+        const loadingText = audioLoadingIndicator.querySelector('.loading-text');
+        if (loadingText) {
+            loadingText.textContent = message;
+        }
+        audioLoadingIndicator.style.display = 'flex';
+    }
+    
+    // Disable all input controls
+    if (audioFileInput) audioFileInput.disabled = true;
+    if (loadDefaultBtn) loadDefaultBtn.disabled = true;
+    if (youtubeUrlInput) youtubeUrlInput.disabled = true;
+    if (loadYouTubeBtn) loadYouTubeBtn.disabled = true;
+}
+
+function hideAudioLoading() {
+    try {
+        if (audioLoadingIndicator) {
+            audioLoadingIndicator.style.display = 'none';
+        }
+        
+        // Re-enable all input controls
+        if (audioFileInput) audioFileInput.disabled = false;
+        if (loadDefaultBtn) loadDefaultBtn.disabled = false;
+        if (youtubeUrlInput) youtubeUrlInput.disabled = false;
+        if (loadYouTubeBtn) loadYouTubeBtn.disabled = false;
+    } catch (error) {
+        console.error('Error hiding loading indicator:', error);
+        // Force hide even if there's an error
+        if (audioLoadingIndicator) {
+            audioLoadingIndicator.style.display = 'none';
+        }
+    }
+}
+
+// Backend endpoint that should return audio for a given YouTube URL.
+// You must implement this server-side (e.g. using yt-dlp) so that:
+//   GET `${YOUTUBE_AUDIO_API}?url=<youtube-url>`
+// returns either:
+//   - raw audio (content-type: audio/*) or
+//   - JSON: { audioUrl: "<direct-audio-url>" }
+const YOUTUBE_AUDIO_API = 'http://localhost:3000/api/youtube-audio';
+const YOUTUBE_VIDEO_API = 'http://localhost:3000/api/youtube-video';
 
 // Create mainScriptAPI object for TouchControl
 const mainScriptAPI = {
@@ -215,14 +1076,14 @@ async function initializeHands() {
         });
 
         hands.setOptions({
-            maxNumHands: 1,
+            maxNumHands: 2,
             modelComplexity: 1,
             minDetectionConfidence: 0.7,  // Increased from 0.5 for better detection
             minTrackingConfidence: 0.7    // Increased from 0.5 for smoother tracking at speed
         });
 
         hands.onResults(onResults);
-
+        /*
         console.log("Initializing MediaPipe Selfie Segmentation...");
         
         if (typeof SelfieSegmentation === 'undefined') {
@@ -240,7 +1101,7 @@ async function initializeHands() {
 
             selfieSegmentation.onResults(onSegmentationResults);
         }
-
+        */
         console.log("MediaPipe initialized, starting camera...");
 
         if (typeof Camera === 'undefined') {
@@ -250,9 +1111,10 @@ async function initializeHands() {
         camera = new Camera(videoElement, {
             onFrame: async () => {
                 await hands.send({image: videoElement});
+                /*
                 if (selfieSegmentation) {
                     await selfieSegmentation.send({image: videoElement});
-                }
+                } */
             },
             width: 640,
             height: 480
@@ -310,39 +1172,27 @@ function onResults(results) {
     canvasCtx.save();
     canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
     
-    // If we have segmentation results, apply background blur
-    if (segmentationResults && segmentationResults.segmentationMask) {
-        // Step 1: Draw the clear person first
-        canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
-        
-        // Step 2: Use the mask to keep only the person (cut out the person)
-        canvasCtx.globalCompositeOperation = 'destination-in';
-        canvasCtx.drawImage(segmentationResults.segmentationMask, 0, 0, canvasElement.width, canvasElement.height);
-        
-        // Step 3: Create blurred background on a temporary canvas
-        const tempCanvas = document.createElement('canvas');
-        tempCanvas.width = canvasElement.width;
-        tempCanvas.height = canvasElement.height;
-        const tempCtx = tempCanvas.getContext('2d');
-        
-        // Draw blurred version of the entire image
-        tempCtx.filter = 'blur(20px)';
-        tempCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
-        
-        // Step 4: Draw blurred background behind the clear person
-        canvasCtx.globalCompositeOperation = 'destination-over';
-        canvasCtx.drawImage(tempCanvas, 0, 0);
-        
-        // Reset composite operation
-        canvasCtx.globalCompositeOperation = 'source-over';
-    } else {
-        // No segmentation, just draw the image normally
-        canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+    canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+
+    let rightHandLandmarks = null;
+    let leftHandLandmarks = null;
+    
+    // Identify left and right hands
+    if (results.multiHandLandmarks && results.multiHandedness) {
+        for (let i = 0; i < results.multiHandLandmarks.length; i++) {
+            const handedness = results.multiHandedness[i].label;
+            const landmarks = results.multiHandLandmarks[i];
+            
+            if (handedness === 'Left') {
+                rightHandLandmarks = landmarks;
+            } else if (handedness === 'Right') {
+                leftHandLandmarks = landmarks;
+            }
+        }
     }
 
-    if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-        const landmarks = results.multiHandLandmarks[0];
-        
+    // Handle RIGHT hand (playback control)
+    if (rightHandLandmarks) {
         isFingerDetected = true;
         lastHandDetectedTime = Date.now();
         
@@ -352,14 +1202,11 @@ function onResults(results) {
         }
         
         if (gestureControlEnabled) {
-            // Check play/pause gestures for both modes
-            detectPlayPauseGesture(landmarks);
+            detectPlayPauseGesture(rightHandLandmarks);
             
-            // Check play gesture when not playing (either never started or manually paused)
             if (!isPlaying) {
-                detectPlayGesture(landmarks);
+                detectPlayGesture(rightHandLandmarks);
             } else {
-                // Reset play gesture if playing
                 if (playGestureActive) {
                     console.log(`[${controlMode}] Resetting play gesture - already playing`);
                     playGestureActive = false;
@@ -369,23 +1216,17 @@ function onResults(results) {
             }
         }
         
-        highlightIndexFinger(landmarks);
+        highlightIndexFinger(rightHandLandmarks);
 
-        // Always detect rotation/velocity for control, regardless of play state
         if (controlMode === 'distance') {
-            detectIndexFingerRotation(landmarks);
+            detectIndexFingerRotation(rightHandLandmarks);
         } else {
-            detectFingerVelocity(landmarks);
+            detectFingerVelocity(rightHandLandmarks);
         }
     } else {
         isFingerDetected = false;
         fingerStatus.textContent = '❌';
         resetRotationState();
-        
-        // Reset motion prediction
-        lastFingerTip = null;
-        fingerVelocityX = 0;
-        fingerVelocityY = 0;
         
         isPalmHolding = false;
         palmHoldStartTime = 0;
@@ -406,6 +1247,20 @@ function onResults(results) {
                 handTimeoutTimer = null;
             }, handDetectionTimeout);
         }
+    }
+    
+    // Handle LEFT hand (volume control)
+    if (leftHandLandmarks) {
+        detectVolumeGesture(leftHandLandmarks);
+        highlightLeftHand(leftHandLandmarks);
+        if (volumeStatus) {
+            volumeStatus.style.display = 'block';
+        }
+    } else {
+        if (volumeStatus) {
+            volumeStatus.style.display = 'none';
+        }
+        volumeHistory = [];
     }
     
     canvasCtx.restore();
@@ -936,6 +1791,124 @@ function detectOpenPalm(landmarks) {
     return extendedCount >= 4;
 }
 
+function highlightLeftHand(landmarks) {
+    const wrist = landmarks[0];
+    const middleMCP = landmarks[9];
+    
+    const handY = (wrist.y + middleMCP.y) / 2;
+    const MIN_Y = 0.2;
+    const MAX_Y = 0.8;
+    let mappedVolume = 1.0 - ((handY - MIN_Y) / (MAX_Y - MIN_Y));
+    mappedVolume = clamp(mappedVolume, 0.0, 1.0);
+    
+    const centerX = wrist.x * canvasElement.width;
+    const centerY = wrist.y * canvasElement.height;
+    const radius = 40;
+    
+    // Save the current context state
+    canvasCtx.save();
+    
+    // Background circle
+    canvasCtx.beginPath();
+    canvasCtx.arc(centerX, centerY, radius, 0, 2 * Math.PI);
+    canvasCtx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+    canvasCtx.fill();
+    
+    // Progress arc
+    canvasCtx.beginPath();
+    const startAngle = -Math.PI / 2;
+    const endAngle = startAngle + (mappedVolume * 2 * Math.PI);
+    canvasCtx.arc(centerX, centerY, radius - 5, startAngle, endAngle, false);
+    canvasCtx.lineWidth = 8;
+    canvasCtx.lineCap = 'round';
+    
+    // Color based on volume level
+    if (mappedVolume > 0.66) {
+        canvasCtx.strokeStyle = '#4ade80'; // Green
+    } else if (mappedVolume > 0.33) {
+        canvasCtx.strokeStyle = '#fbbf24'; // Yellow
+    } else {
+        canvasCtx.strokeStyle = '#ef4444'; // Red
+    }
+    canvasCtx.stroke();
+    
+    // Volume percentage text - flip it to read correctly
+    canvasCtx.translate(centerX, centerY); // Move to center
+    canvasCtx.scale(-1, 1); // Flip horizontally to un-mirror the text
+    canvasCtx.fillStyle = '#ffffff';
+    canvasCtx.font = 'bold 20px Arial';
+    canvasCtx.textAlign = 'center';
+    canvasCtx.textBaseline = 'middle';
+    canvasCtx.fillText(Math.round(mappedVolume * 100) + '%', 0, 0);
+    
+    // Restore the context state
+    canvasCtx.restore();
+}
+
+function detectVolumeGesture(landmarks) {
+    // Use wrist (0) and middle finger MCP (9) to calculate hand height
+    const wrist = landmarks[0];
+    const middleMCP = landmarks[9];
+    
+    // Calculate average y position (lower y = higher on screen)
+    const handY = (wrist.y + middleMCP.y) / 2;
+    
+    // Smooth the volume over multiple frames
+    volumeHistory.push(handY);
+    if (volumeHistory.length > VOLUME_SMOOTHING_FRAMES) {
+        volumeHistory.shift();
+    }
+    
+    const currentTime = Date.now();
+    if (currentTime - lastVolumeUpdateTime < volumeUpdateInterval) {
+        return; // Throttle updates
+    }
+    lastVolumeUpdateTime = currentTime;
+    
+    // Calculate smoothed position
+    const smoothedY = volumeHistory.reduce((sum, val) => sum + val, 0) / volumeHistory.length;
+    
+    // Map Y position to volume (0.0 to 1.0)
+    // Y ranges from 0 (top) to 1 (bottom)
+    // We want: top = high volume (1.0), bottom = low volume (0.0)
+    const MIN_Y = 0.2;  // Top 20% of screen
+    const MAX_Y = 0.8;  // Bottom 80% of screen
+    
+    let mappedVolume = 1.0 - ((smoothedY - MIN_Y) / (MAX_Y - MIN_Y));
+    mappedVolume = clamp(mappedVolume, 0.0, 1.0);
+    
+    currentVolume = mappedVolume;
+    
+    // Apply volume to audio elements
+    if (htmlAudioElement) {
+        htmlAudioElement.volume = currentVolume;
+    }
+    if (htmlVideoElement) {
+        htmlVideoElement.volume = currentVolume;
+    }
+    
+    // Update UI
+    updateVolumeDisplay();
+}
+
+function updateVolumeDisplay() {
+    if (!volumeText || !volumeIcon) return;
+    
+    const volumePercent = Math.round(currentVolume * 100);
+    volumeText.textContent = `${volumePercent}%`;
+    
+    // Update icon based on volume level
+    if (currentVolume === 0) {
+        volumeIcon.textContent = '🔇'; // Muted
+    } else if (currentVolume < 0.33) {
+        volumeIcon.textContent = '🔈'; // Low
+    } else if (currentVolume < 0.67) {
+        volumeIcon.textContent = '🔉'; // Medium
+    } else {
+        volumeIcon.textContent = '🔊'; // High
+    }
+}
+
 // ========== AUDIO PLAYER FUNCTIONS ==========
 audioContext = new (window.AudioContext || window.webkitAudioContext)();
 
@@ -950,51 +1923,239 @@ segmentIntervalInput.value = params.navigation.segmentIntervalMs;
 fadeDurationInput.value = params.navigation.fadeDuration;
 updateEffectiveParams();
 
-audioFileInput.addEventListener('change', async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-
-    stopPlayback();
-
-    const arrayBuffer = await file.arrayBuffer();
-    audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
-
-    const fileURL = URL.createObjectURL(file);
-    htmlAudioElement.src = fileURL;
-    htmlAudioElement.preservesPitch = true;
-    htmlAudioElement.mozPreservesPitch = true;
-    htmlAudioElement.webkitPreservesPitch = true;
-
-    seekBar.max = audioBuffer.duration;
-    seekBar.value = 0;
-    pauseTime = 0;
-
-    durationDisplay.textContent = formatTime(audioBuffer.duration);
-    currentTimeDisplay.textContent = formatTime(0);
-
-    controls.style.display = 'block';
-});
-
-loadDefaultBtn.addEventListener('click', async () => {
-    stopPlayback();
-    audioFileInput.value = '';
-
+/**
+ * Load audio from a URL into both the hidden HTML5 audio element
+ * (for forward playback) and into an AudioBuffer (for reverse / chunked playback).
+ */
+async function loadAudioFromUrl(audioUrl, loadingMessage = 'Loading audio...', videoUrl = null) {
+    showAudioLoading(loadingMessage);
+    let loadingHidden = false;
+    
+    const ensureLoadingHidden = () => {
+        if (!loadingHidden) {
+            loadingHidden = true;
+            hideAudioLoading();
+        }
+    };
+    
     try {
-        const audioUrl = './around-the-world-in-80-days-chapter-10.mp3';
-        
+        stopPlayback();
+        audioFileInput.value = '';
+
         htmlAudioElement.src = audioUrl;
         htmlAudioElement.preservesPitch = true;
         htmlAudioElement.mozPreservesPitch = true;
         htmlAudioElement.webkitPreservesPitch = true;
 
+        // Wait for basic metadata so duration is available for the HTML audio element
         await new Promise((resolve, reject) => {
-            htmlAudioElement.onloadedmetadata = resolve;
-            htmlAudioElement.onerror = reject;
+            const timeout = setTimeout(() => {
+                // Clean up event listeners
+                htmlAudioElement.onloadedmetadata = null;
+                htmlAudioElement.onerror = null;
+                reject(new Error('Audio metadata loading timed out'));
+            }, 30000); // 30 second timeout
+            
+            const cleanup = () => {
+                clearTimeout(timeout);
+                htmlAudioElement.onloadedmetadata = null;
+                htmlAudioElement.onerror = null;
+            };
+            
+            htmlAudioElement.onloadedmetadata = () => {
+                cleanup();
+                resolve();
+            };
+            htmlAudioElement.onerror = (e) => {
+                cleanup();
+                reject(new Error('Audio element failed to load'));
+            };
         });
 
-        const response = await fetch(audioUrl);
-        const arrayBuffer = await response.arrayBuffer();
+        // Fetch the audio data to decode into an AudioBuffer
+        // For blob URLs, we need to fetch them differently
+        let arrayBuffer;
+        try {
+            if (audioUrl.startsWith('blob:')) {
+                // For blob URLs, fetch directly
+                const response = await fetch(audioUrl);
+                if (!response.ok) {
+                    throw new Error(`Failed to fetch audio data from blob (status ${response.status})`);
+                }
+                arrayBuffer = await response.arrayBuffer();
+            } else {
+                // For regular URLs, fetch normally
+                const response = await fetch(audioUrl);
+                if (!response.ok) {
+                    throw new Error(`Failed to fetch audio data (status ${response.status})`);
+                }
+                arrayBuffer = await response.arrayBuffer();
+            }
+            
+            audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+        } catch (bufferError) {
+            // If AudioBuffer creation fails, but the HTML audio element loaded successfully,
+            // we can still use the audio element for playback (forward only)
+            console.warn('Failed to create AudioBuffer (reverse playback may not work):', bufferError);
+            
+            // Use the HTML audio element's duration if available
+            if (htmlAudioElement.duration && !isNaN(htmlAudioElement.duration) && htmlAudioElement.duration > 0) {
+                // Audio element loaded successfully, continue with it
+                // audioBuffer will be null, but forward playback will still work
+                audioBuffer = null;
+            } else {
+                // Can't determine duration, this is a real error
+                throw new Error('Failed to load audio: could not determine duration. ' + bufferError.message);
+            }
+        }
+
+        // Use audioBuffer duration if available, otherwise use HTML audio element duration
+        const duration = audioBuffer ? audioBuffer.duration : (htmlAudioElement.duration || 0);
+        
+        seekBar.max = duration;
+        seekBar.value = 0;
+        pauseTime = 0;
+
+        durationDisplay.textContent = formatTime(duration);
+        currentTimeDisplay.textContent = formatTime(0);
+
+        controls.style.display = 'block';
+        stopPlayback();
+        
+        // Load video if provided
+        if (videoUrl && htmlVideoElement && videoContainer) {
+            console.log('Loading video into element, URL:', videoUrl);
+            try {
+                htmlVideoElement.src = videoUrl;
+                htmlVideoElement.load();
+                
+                // Wait for video to be ready
+                await new Promise((resolve, reject) => {
+                    const timeout = setTimeout(() => {
+                        cleanup();
+                        reject(new Error('Video loading timed out'));
+                    }, 30000);
+                    
+                    const cleanup = () => {
+                        clearTimeout(timeout);
+                        htmlVideoElement.onloadedmetadata = null;
+                        htmlVideoElement.onerror = null;
+                        htmlVideoElement.oncanplay = null;
+                    };
+                    
+                    // Try multiple events to catch when video is ready
+                    const onReady = () => {
+                        cleanup();
+                        console.log('Video ready, duration:', htmlVideoElement.duration);
+                        resolve();
+                    };
+                    
+                    htmlVideoElement.onloadedmetadata = onReady;
+                    htmlVideoElement.oncanplay = onReady;
+                    htmlVideoElement.onerror = (e) => {
+                        cleanup();
+                        console.error('Video element error:', e, htmlVideoElement.error);
+                        reject(new Error('Video failed to load: ' + (htmlVideoElement.error?.message || 'Unknown error')));
+                    };
+                });
+                
+                // Show video container
+                videoContainer.style.display = 'block';
+                console.log('Video container displayed');
+                
+                // Disable all user interactions with video
+                htmlVideoElement.controls = false;
+                htmlVideoElement.disablePictureInPicture = true;
+                
+                // Prevent user from interacting with video
+                htmlVideoElement.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    // Video is controlled by audio, not user clicks
+                }, true);
+                
+                htmlVideoElement.addEventListener('contextmenu', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                }, true);
+                
+                htmlVideoElement.addEventListener('play', (e) => {
+                    // Only allow play if audio is playing
+                    if (!isPlaying) {
+                        htmlVideoElement.pause();
+                    }
+                });
+                
+                htmlVideoElement.addEventListener('pause', (e) => {
+                    // Only allow pause if audio is paused
+                    if (isPlaying && !manuallyPaused) {
+                        htmlVideoElement.play().catch(() => {});
+                    }
+                });
+                
+                // Sync video with audio
+                syncVideoWithAudio();
+            } catch (videoError) {
+                console.error('Failed to load video (audio will still work):', videoError);
+                // Hide video container if video failed to load
+                if (videoContainer) {
+                    videoContainer.style.display = 'none';
+                }
+            }
+        } else {
+            console.log('No video to load:', { videoUrl: !!videoUrl, htmlVideoElement: !!htmlVideoElement, videoContainer: !!videoContainer });
+            // Hide video container if no video
+            if (videoContainer) {
+                videoContainer.style.display = 'none';
+            }
+        }
+        
+        // Try to update UI if handleFileLoaded is available (for file uploads)
+        // For URLs, this might not be applicable, so wrap in try-catch
+        try {
+            // Extract filename from URL or use a default
+            const urlParts = audioUrl.split('/');
+            const fileName = urlParts[urlParts.length - 1].split('?')[0] || 'Audio';
+            if (typeof handleFileLoaded === 'function') {
+                const duration = audioBuffer ? audioBuffer.duration : (htmlAudioElement.duration || 0);
+                handleFileLoaded(fileName, duration);
+            }
+        } catch (uiError) {
+            // Ignore UI update errors - audio is loaded successfully
+            console.warn('UI update error (non-critical):', uiError);
+        }
+        
+        // Hide loading indicator on success
+        ensureLoadingHidden();
+    } catch (error) {
+        console.error('Error loading audio from URL:', error);
+        // Hide loading indicator before showing error
+        ensureLoadingHidden();
+        alert('Failed to load audio from the provided URL.');
+        throw error;
+    } finally {
+        // Always hide loading indicator as a final safeguard
+        ensureLoadingHidden();
+    }
+}
+
+audioFileInput.addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    showAudioLoading('Loading audio file...');
+
+    try {
+        stopPlayback();
+
+        const arrayBuffer = await file.arrayBuffer();
         audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+
+        const fileURL = URL.createObjectURL(file);
+        htmlAudioElement.src = fileURL;
+        htmlAudioElement.preservesPitch = true;
+        htmlAudioElement.mozPreservesPitch = true;
+        htmlAudioElement.webkitPreservesPitch = true;
 
         seekBar.max = audioBuffer.duration;
         seekBar.value = 0;
@@ -1004,21 +2165,253 @@ loadDefaultBtn.addEventListener('click', async () => {
         currentTimeDisplay.textContent = formatTime(0);
 
         controls.style.display = 'block';
-        stopPlayback();
+        
+        // UPDATE: Use new function
+        handleFileLoaded(file.name, audioBuffer.duration);
+    } catch (error) {
+        console.error('Error loading audio file:', error);
+        alert('Failed to load audio file.');
+    } finally {
+        hideAudioLoading();
+        // Reset file input so the same file can be selected again
+        audioFileInput.value = '';
+    }
+});
+
+loadDefaultBtn.addEventListener('click', async () => {
+    try {
+        const audioUrl = './around-the-world-in-80-days-chapter-10.mp3';
+        await loadAudioFromUrl(audioUrl, 'Loading default audio...');
     } catch (error) {
         console.error('Error loading default audio:', error);
         alert('Failed to load default audio file.');
     }
 });
 
+if (loadYouTubeBtn && youtubeUrlInput) {
+    loadYouTubeBtn.addEventListener('click', async () => {
+        const rawUrl = youtubeUrlInput.value.trim();
+        if (!rawUrl) {
+            alert('Please paste a YouTube link first.');
+            return;
+        }
+
+        // Basic sanity check – this does NOT validate all valid YouTube URLs
+        if (!/^https?:\/\/(www\.)?(youtube\.com|youtu\.be)\//i.test(rawUrl)) {
+            if (!confirm('This does not look like a YouTube URL. Try to load it anyway?')) {
+                return;
+            }
+        }
+
+        // Check if backend server is reachable first
+        showAudioLoading('Checking backend connection...');
+        try {
+            const healthController = new AbortController();
+            const healthTimeout = setTimeout(() => healthController.abort(), 5000); // 5 second timeout
+            
+            const healthCheck = await fetch(`${YOUTUBE_AUDIO_API.replace('/api/youtube-audio', '/api/health')}`, {
+                method: 'GET',
+                signal: healthController.signal
+            });
+            clearTimeout(healthTimeout);
+            
+            if (!healthCheck.ok) {
+                throw new Error('Backend server is not responding correctly.');
+            }
+        } catch (healthError) {
+            hideAudioLoading();
+            if (healthError.name === 'AbortError') {
+                alert('Backend server connection timed out. Please make sure:\n1. The server is running (node server.js)\n2. The server is accessible at http://localhost:3000');
+            } else {
+                alert('Cannot connect to backend server. Please make sure:\n1. The server is running (node server.js)\n2. The server is accessible at http://localhost:3000\n3. CORS is enabled on the server');
+            }
+            console.error('Backend health check failed:', healthError);
+            return;
+        }
+
+        showAudioLoading('Fetching audio from YouTube...');
+
+        try {
+            stopPlayback();
+
+            const apiUrl = `${YOUTUBE_AUDIO_API}?url=${encodeURIComponent(rawUrl)}`;
+            
+            // Fetch with timeout handling
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 minute timeout
+            
+            let response;
+            try {
+                response = await fetch(apiUrl, {
+                    signal: controller.signal
+                });
+            } catch (fetchError) {
+                clearTimeout(timeoutId);
+                if (fetchError.name === 'AbortError') {
+                    throw new Error('Request timed out. The video might be too long or the server is taking too long to respond.');
+                }
+                throw new Error(`Network error: ${fetchError.message}. Make sure the backend server is running.`);
+            }
+            clearTimeout(timeoutId);
+            
+            if (!response.ok) {
+                let errorMessage = `Backend error: ${response.status}`;
+                try {
+                    const errorData = await response.json();
+                    if (errorData.error) {
+                        errorMessage = errorData.error;
+                    }
+                } catch (e) {
+                    // Response is not JSON, use status text
+                    errorMessage = response.statusText || errorMessage;
+                }
+                throw new Error(errorMessage);
+            }
+
+            showAudioLoading('Processing audio stream...');
+
+            const contentType = response.headers.get('content-type') || '';
+            let audioUrl;
+
+            if (contentType.startsWith('audio/')) {
+                try {
+                    // Read the streaming response as a blob
+                    const blob = await response.blob();
+                    
+                    // Check if blob is empty or invalid
+                    if (blob.size === 0) {
+                        throw new Error('Received empty audio stream from server.');
+                    }
+                    
+                    audioUrl = URL.createObjectURL(blob);
+                } catch (blobError) {
+                    console.error('Error creating blob from stream:', blobError);
+                    hideAudioLoading(); // Hide before throwing
+                    throw new Error(`Failed to process audio stream: ${blobError.message}. The video might be too large or the stream was interrupted.`);
+                }
+            } else {
+                try {
+                    const data = await response.json();
+                    if (!data || !data.audioUrl) {
+                        hideAudioLoading(); // Hide before throwing
+                        throw new Error('Backend did not return an audioUrl field.');
+                    }
+                    audioUrl = data.audioUrl;
+                } catch (jsonError) {
+                    console.error('Error parsing JSON response:', jsonError);
+                    hideAudioLoading(); // Hide before throwing
+                    throw new Error('Backend returned an unexpected response format.');
+                }
+            }
+
+            // Hide the current loading indicator before loadAudioFromUrl shows its own
+            hideAudioLoading();
+            
+            // Also fetch video in parallel
+            showAudioLoading('Fetching video from YouTube...');
+            let videoUrl = null;
+            try {
+                // Note: Server doesn't require API key for video endpoint, but we'll include it for consistency
+                const videoApiUrl = `${YOUTUBE_VIDEO_API}?url=${encodeURIComponent(rawUrl)}`;
+                console.log('Fetching video from:', videoApiUrl);
+                console.log('Video API endpoint:', YOUTUBE_VIDEO_API);
+                
+                const videoController = new AbortController();
+                const videoTimeout = setTimeout(() => {
+                    videoController.abort();
+                    console.error('Video fetch timed out after 5 minutes');
+                }, 300000); // 5 minute timeout
+                
+                const videoResponse = await fetch(videoApiUrl, {
+                    signal: videoController.signal
+                });
+                clearTimeout(videoTimeout);
+                
+                console.log('Video response received:', {
+                    ok: videoResponse.ok,
+                    status: videoResponse.status,
+                    statusText: videoResponse.statusText
+                });
+                
+                if (videoResponse.ok) {
+                    const videoContentType = videoResponse.headers.get('content-type') || '';
+                    console.log('Video content type:', videoContentType);
+                    console.log('Video response status:', videoResponse.status);
+                    console.log('Video response headers:', Object.fromEntries(videoResponse.headers.entries()));
+                    
+                    // Accept video content types (mp4, webm, etc.)
+                    if (videoContentType.startsWith('video/') || videoContentType.includes('mp4') || videoContentType.includes('webm')) {
+                        const videoBlob = await videoResponse.blob();
+                        console.log('Video blob size:', videoBlob.size, 'bytes');
+                        
+                        if (videoBlob.size > 0) {
+                            videoUrl = URL.createObjectURL(videoBlob);
+                            console.log('Video URL created successfully:', videoUrl);
+                        } else {
+                            console.error('Video blob is empty - video download may have failed');
+                        }
+                    } else {
+                        console.error('Video response is not a video type. Content-Type:', videoContentType);
+                        // Try to read as blob anyway in case content-type is wrong
+                        try {
+                            const videoBlob = await videoResponse.blob();
+                            console.log('Attempting to use response as video blob anyway, size:', videoBlob.size);
+                            if (videoBlob.size > 1000) { // At least 1KB
+                                videoUrl = URL.createObjectURL(videoBlob);
+                                console.log('Video URL created from blob:', videoUrl);
+                            }
+                        } catch (blobError) {
+                            console.error('Failed to create blob from response:', blobError);
+                        }
+                    }
+                } else {
+                    const errorText = await videoResponse.text().catch(() => 'Unknown error');
+                    console.error('Video fetch failed with status:', videoResponse.status);
+                    console.error('Error response:', errorText);
+                }
+            } catch (videoError) {
+                console.error('Error fetching video (continuing with audio only):', videoError);
+                console.error('Video error details:', {
+                    name: videoError.name,
+                    message: videoError.message,
+                    stack: videoError.stack
+                });
+            }
+            
+            console.log('Final videoUrl value before passing to loadAudioFromUrl:', videoUrl);
+            
+            // loadAudioFromUrl will handle showing/hiding the loading indicator
+            await loadAudioFromUrl(audioUrl, 'Loading YouTube audio...', videoUrl);
+        } catch (error) {
+            console.error('Error loading YouTube audio:', error);
+            
+            // Ensure loading indicator is hidden on error
+            hideAudioLoading();
+            
+            let userMessage = 'Failed to load audio from YouTube.';
+            if (error.message) {
+                userMessage = error.message;
+            } else if (error.name === 'TypeError' && error.message.includes('Failed to fetch')) {
+                userMessage = 'Cannot connect to backend server. Make sure the server is running at http://localhost:3000';
+            }
+            
+            alert(userMessage);
+        }
+    });
+}
+
 speedBar.addEventListener('input', (e) => {
     let newSpeed = clamp(parseFloat(e.target.value), params.navigation.minSpeed, params.navigation.maxSpeed);
+
     newSpeed = applyDeadZoneMapping(newSpeed);
+
     navigationSpeed = newSpeed;
     rawNavigationSpeed = newSpeed;
     speedValue.textContent = newSpeed.toFixed(2);
+
     gestureTarget = newSpeed;
     manuallyPaused = false;
+
     if (!filterAnimationFrame) {
         updateFilteredSpeed();
     }
@@ -1078,6 +2471,7 @@ function updateEffectiveParams() {
     const speed = Math.abs(filteredSpeed);
     const effectiveStep = params.navigation.segmentStep * speed;
     const effectiveInterval = (params.navigation.segmentIntervalMs / 1000) / speed;
+
     effectiveStepDisplay.textContent = effectiveStep.toFixed(2);
     effectiveIntervalDisplay.textContent = (effectiveInterval * 1000).toFixed(0);
 }
@@ -1114,6 +2508,49 @@ fadeDurationInput.addEventListener('input', (e) => {
 });
 
 function updateFilteredSpeed() {
+    if (controlMode === 'touch') {
+        filteredSpeed = navigationSpeed;
+        filteredSpeedBar.value = filteredSpeed;
+        filteredSpeedValue.textContent = filteredSpeed.toFixed(2);
+        
+        if (isPlaying) {
+            if ((prevNavigationSpeed < 0 && filteredSpeed >= 0) || 
+                (prevNavigationSpeed >= 0 && filteredSpeed < 0)) {
+                const currentPos = parseFloat(seekBar.value);
+                pauseTime = currentPos;
+                
+                activeSources.forEach((source) => {
+                    try { source.stop(); } catch (e) {}
+                });
+                activeSources.clear();
+                if (scheduleTimeout) {
+                    clearTimeout(scheduleTimeout);
+                    scheduleTimeout = null;
+                }
+                htmlAudioElement.pause();
+                
+                prevNavigationSpeed = filteredSpeed;
+                
+                if (filteredSpeed < 0) {
+                    playReverseChunk(pauseTime);
+                } else {
+                    playForwardNormal(pauseTime);
+                }
+            } else {
+                applyFilteredSpeed();
+                prevNavigationSpeed = filteredSpeed;
+            }
+        }
+        return;
+    }
+    if (manuallyPaused) {
+        if (filterAnimationFrame) {
+            cancelAnimationFrame(filterAnimationFrame);
+            filterAnimationFrame = null;
+        }
+        return;
+    }
+
     const alpha = isFingerDetected ? params.filtering.alphaFinger : params.filtering.alphaNoFinger;
     updateAlphaDisplay();
 
@@ -1132,7 +2569,7 @@ function updateFilteredSpeed() {
         filteredSpeedValue.textContent = filteredSpeed.toFixed(2);
         filteredSpeedBar.value = filteredSpeed;
         
-        if (isPlaying && !manuallyPaused) {
+        if (isPlaying) {
             const currentPos = parseFloat(seekBar.value);
             pauseTime = currentPos;
             
@@ -1190,7 +2627,7 @@ function updateFilteredSpeed() {
         speedValue.textContent = navigationSpeed.toFixed(2);
     }
     
-    if (crossedDeadZone && isPlaying && !manuallyPaused) {
+    if (crossedDeadZone && isPlaying) {
         const currentPos = parseFloat(seekBar.value);
         pauseTime = currentPos;
         
@@ -1213,11 +2650,26 @@ function updateFilteredSpeed() {
         }
     }
     
-    if (isPlaying && !manuallyPaused) {
+    if (isPlaying) {
         applyFilteredSpeed();
     }
 
     previousGestureTarget = gestureTarget;
+
+    if (smartScrubEnabled && isPlaying && !manuallyPaused && informativeWords.length > 0) {
+    const speed = Math.abs(filteredSpeed);
+    
+    if (speed >= SMART_SCRUB_SPEED_THRESHOLD && !smartScrubActive) {
+        // Speed crossed threshold - activate smart scrub
+        console.log('Activating smart scrub at speed:', filteredSpeed.toFixed(2));
+        recalcInformative(true);
+        startSmartScrub();
+    } else if (speed < SMART_SCRUB_SPEED_THRESHOLD && smartScrubActive) {
+        // Speed dropped below threshold - deactivate
+        console.log('Deactivating smart scrub at speed:', filteredSpeed.toFixed(2));
+        stopSmartScrub();
+    }
+    }
 
     const diff = Math.abs(gestureTarget - filteredSpeed);
     if (diff > 0.001) {
@@ -1226,10 +2678,33 @@ function updateFilteredSpeed() {
         filteredSpeed = gestureTarget;
         filteredSpeedValue.textContent = filteredSpeed.toFixed(2);
         filteredSpeedBar.value = filteredSpeed;
-        if (isPlaying && !manuallyPaused) {
+        if (isPlaying) {
             applyFilteredSpeed();
         }
         filterAnimationFrame = null;
+    }
+}
+
+// Function to sync video with audio
+function syncVideoWithAudio() {
+    if (!htmlVideoElement || !htmlAudioElement) return;
+    
+    try {
+        // Sync playback rate
+        if (!htmlAudioElement.paused) {
+            const targetPlaybackRate = Math.abs(filteredSpeed);
+            const safePlaybackRate = clamp(targetPlaybackRate, MIN_PLAYBACK_RATE, MAX_PLAYBACK_RATE);
+            htmlVideoElement.playbackRate = safePlaybackRate;
+        }
+        
+        // Sync position (with small tolerance to avoid constant updates)
+        const timeDiff = Math.abs(htmlVideoElement.currentTime - htmlAudioElement.currentTime);
+        if (timeDiff > 0.1) {
+            htmlVideoElement.currentTime = htmlAudioElement.currentTime;
+        }
+    } catch (error) {
+        // Ignore sync errors
+        console.warn('Video sync error:', error);
     }
 }
 
@@ -1240,6 +2715,11 @@ function applyFilteredSpeed() {
         const targetPlaybackRate = Math.abs(filteredSpeed);
         const safePlaybackRate = clamp(targetPlaybackRate, MIN_PLAYBACK_RATE, MAX_PLAYBACK_RATE);
         htmlAudioElement.playbackRate = safePlaybackRate;
+        
+        // Sync video playback rate
+        if (htmlVideoElement && !htmlVideoElement.paused) {
+            htmlVideoElement.playbackRate = safePlaybackRate;
+        }
     }
 
     updateEffectiveParams();
@@ -1249,6 +2729,11 @@ seekBar.addEventListener('input', (e) => {
     const newTime = parseFloat(e.target.value);
     pauseTime = newTime;
     currentTimeDisplay.textContent = formatTime(newTime);
+    
+    // Sync video position when seeking
+    if (htmlVideoElement && videoContainer && videoContainer.style.display !== 'none') {
+        htmlVideoElement.currentTime = newTime;
+    }
     
     if (isPlaying) {
         stopPlayback();
@@ -1280,6 +2765,15 @@ function playForwardNormal(startPosition) {
     htmlAudioElement.currentTime = startPosition;
     htmlAudioElement.playbackRate = Math.abs(filteredSpeed);
     htmlAudioElement.play();
+    
+    // Sync video
+    if (htmlVideoElement && videoContainer && videoContainer.style.display !== 'none') {
+        htmlVideoElement.currentTime = startPosition;
+        htmlVideoElement.playbackRate = Math.abs(filteredSpeed);
+        htmlVideoElement.play().catch(err => {
+            console.warn('Video play error:', err);
+        });
+    }
 
     htmlAudioElement.onended = () => {
         if (isPlaying) {
@@ -1308,6 +2802,18 @@ function updateForwardTimeDisplay() {
         const currentPos = htmlAudioElement.currentTime;
         seekBar.value = currentPos;
         currentTimeDisplay.textContent = formatTime(currentPos);
+        
+        // Sync video position
+        if (htmlVideoElement && videoContainer && videoContainer.style.display !== 'none') {
+            try {
+                const timeDiff = Math.abs(htmlVideoElement.currentTime - currentPos);
+                if (timeDiff > 0.1) {
+                    htmlVideoElement.currentTime = currentPos;
+                }
+            } catch (e) {
+                // Ignore sync errors
+            }
+        }
 
         if (currentPos < audioBuffer.duration) {
             animationFrame = setTimeout(update, updateInterval);
@@ -1386,6 +2892,20 @@ function playReverseChunk(chunkEnd) {
 
     source.start(0);
 
+    // Sync video to play the same chunk forward
+    if (htmlVideoElement && videoContainer && videoContainer.style.display !== 'none') {
+        try {
+            // Jump video to chunk start and play forward
+            htmlVideoElement.currentTime = chunkStart;
+            htmlVideoElement.playbackRate = params.playback.speed;
+            htmlVideoElement.play().catch(err => {
+                console.warn('Video play error in reverse chunk:', err);
+            });
+        } catch (e) {
+            console.warn('Video sync error in reverse chunk:', e);
+        }
+    }
+
     updateChunkTimeDisplay(chunkStart, chunkEnd);
 
     const effectiveStep = segmentStep * Math.abs(filteredSpeed);
@@ -1419,6 +2939,23 @@ function updateChunkTimeDisplay(chunkStart, chunkEnd) {
 
         seekBar.value = currentPos;
         currentTimeDisplay.textContent = formatTime(currentPos);
+        
+        // Sync video position to match the chunk playback
+        if (htmlVideoElement && videoContainer && videoContainer.style.display !== 'none') {
+            try {
+                const timeDiff = Math.abs(htmlVideoElement.currentTime - currentPos);
+                if (timeDiff > 0.1) {
+                    htmlVideoElement.currentTime = currentPos;
+                }
+                // Ensure video is playing at the correct speed
+                if (htmlVideoElement.paused) {
+                    htmlVideoElement.play().catch(() => {});
+                }
+                htmlVideoElement.playbackRate = params.playback.speed;
+            } catch (e) {
+                // Ignore sync errors
+            }
+        }
 
         if (currentPos > chunkStart && currentPos < chunkEnd) {
             animationFrame = setTimeout(update, updateInterval);
@@ -1496,6 +3033,16 @@ function pausePlayback() {
     }
 
     stopPlayback();
+
+    if (smartScrubActive) {
+        stopSmartScrub();
+    }
+    
+    // Pause video
+    if (htmlVideoElement && videoContainer && videoContainer.style.display !== 'none') {
+        htmlVideoElement.pause();
+    }
+    
     playBtn.style.display = 'inline-block';
     pauseBtn.style.display = 'none';
 }
@@ -1504,6 +3051,11 @@ function stopPlayback() {
     isPlaying = false;
 
     htmlAudioElement.pause();
+    
+    // Pause video
+    if (htmlVideoElement) {
+        htmlVideoElement.pause();
+    }
 
     activeSources.forEach((source) => {
         try {
@@ -1655,4 +3207,352 @@ window.addEventListener('load', () => {
             TouchControl.init(mainScriptAPI);
         }
     }, 1000);
+});
+
+function handleFileLoaded(fileName, duration) {
+    updateAudioInfoDisplay(fileName, duration);
+    
+    if (fileUploadModal) {
+        fileUploadModal.classList.remove('active');
+    }
+    
+    if (window.innerWidth <= 768) {
+        if (uploadSection) {
+            uploadSection.classList.add('file-loaded');
+            uploadSection.style.display = 'none';
+        }
+        if (fileUploadBtn) {
+            fileUploadBtn.classList.add('show');
+        }
+    }
+    
+    enableTranscription();
+    initWordPlayerPool();
+    
+    // Initialize Howler for smooth word playback
+    try {
+        if (wordHowl) {
+            wordHowl.unload();
+            wordHowl = null;
+        }
+        if (wordHowlUrl) {
+            URL.revokeObjectURL(wordHowlUrl);
+            wordHowlUrl = null;
+        }
+        
+        wordHowlUrl = htmlAudioElement.src;
+        wordHowl = new Howl({
+            src: [wordHowlUrl],
+            html5: false,
+            preload: true,
+            onloaderror: (id, err) => console.error('Howler load error', err),
+            onplayerror: (id, err) => console.error('Howler play error', err)
+        });
+        
+        // Sync word players to same source
+        wordPlayers.forEach(p => { p.src = wordHowlUrl; });
+        
+        console.log('Word playback initialized (Howler + audio pool)');
+    } catch (e) {
+        console.error('Failed to init word playback:', e);
+    }
+}
+
+
+// ========== SETTINGS MODAL ==========
+const settingsBtn = document.getElementById('settingsBtn');
+const settingsModal = document.getElementById('settingsModal');
+const closeSettings = document.getElementById('closeSettings');
+const modalParametersContainer = document.getElementById('modalParametersContainer');
+
+
+// Fullscreen toggle
+const fullscreenToggle = document.getElementById('fullscreenToggle');
+const fullscreenIcon = document.getElementById('fullscreenIcon');
+const touchControlSection = document.getElementById('touchControlSection');
+
+if (fullscreenToggle && touchControlSection) {
+    fullscreenToggle.addEventListener('click', () => {
+        touchControlSection.classList.toggle('fullscreen');
+        
+        // Update icon
+        if (touchControlSection.classList.contains('fullscreen')) {
+            fullscreenIcon.textContent = '⛶'; // Exit fullscreen icon (or use ✕)
+        } else {
+            fullscreenIcon.textContent = '⛶'; // Enter fullscreen icon
+        }
+    });
+}
+
+// Function to move parameters to modal
+function updateModalParameters() {
+    console.log('Control mode:', controlMode);
+    
+    modalParametersContainer.innerHTML = '';
+    
+    // Create a wrapper for better organization
+    const wrapper = document.createElement('div');
+    
+    if (controlMode === 'touch') {
+        // TOUCH MODE PARAMETERS
+        const touchSection = document.createElement('div');
+        touchSection.className = 'settings-section';
+        touchSection.innerHTML = '<h3>Touch Mode Parameters</h3>';
+        
+        // Get ALL touch parameter groups
+        const touchControlSection = document.getElementById('touchControlSection');
+        if (touchControlSection) {
+            const allTouchParams = touchControlSection.querySelectorAll('.touch-parameter-group');
+            const speedDecayGroup = touchControlSection.querySelector('#speed-decay-group');
+            
+            console.log('Found touch parameter groups:', allTouchParams.length);
+            
+            // Clone each parameter group
+            allTouchParams.forEach((group) => {
+                const clone = group.cloneNode(true);
+                clone.style.display = 'block';
+                clone.style.opacity = '1';
+                clone.style.pointerEvents = 'auto';
+                
+                // Sync all input values
+                const inputs = clone.querySelectorAll('input');
+                inputs.forEach(input => {
+                    const originalInput = document.getElementById(input.id);
+                    if (originalInput) {
+                        input.value = originalInput.value;
+                        
+                        // Add event listener to sync back
+                        input.addEventListener('input', (e) => {
+                            originalInput.value = e.target.value;
+                            originalInput.dispatchEvent(new Event('input', { bubbles: true }));
+                        });
+                    }
+                });
+                
+                touchSection.appendChild(clone);
+            });
+            
+            // Add speed decay slider if in scroll mode
+            if (speedDecayGroup && typeof TouchControl !== 'undefined' && TouchControl.inputMode === 'scroll') {
+                const clone = speedDecayGroup.cloneNode(true);
+                clone.style.display = 'block';
+                
+                const slider = clone.querySelector('#speed-decay-display');
+                const label = clone.querySelector('#speed-decay-label');
+                if (slider && TouchControl.speedDecaySlider) {
+                    slider.value = TouchControl.speedDecaySlider.value;
+                }
+                if (label && TouchControl.speedDecayLabel) {
+                    label.textContent = TouchControl.speedDecayLabel.textContent;
+                }
+                
+                touchSection.appendChild(clone);
+            }
+        }
+        
+        wrapper.appendChild(touchSection);
+        
+    } else {
+        // HAND GESTURE MODE PARAMETERS (distance or speed mode)
+        
+        // Alpha Section
+        const alphaSection = document.querySelector('.alpha-section');
+        if (alphaSection) {
+            const clone = alphaSection.cloneNode(true);
+            clone.style.display = 'block';
+            clone.classList.add('settings-section');
+            
+            // Sync all inputs
+            const inputs = clone.querySelectorAll('input[type="number"]');
+            inputs.forEach(input => {
+                const originalInput = document.getElementById(input.id);
+                if (originalInput) {
+                    input.value = originalInput.value;
+                    input.addEventListener('input', (e) => {
+                        originalInput.value = e.target.value;
+                        originalInput.dispatchEvent(new Event('input', { bubbles: true }));
+                    });
+                }
+            });
+            
+            wrapper.appendChild(clone);
+        }
+        
+        // Navigation Parameters Section
+        const paramsSection = document.querySelector('.params-section');
+        if (paramsSection) {
+            const clone = paramsSection.cloneNode(true);
+            clone.style.display = 'block';
+            clone.classList.add('settings-section');
+            
+            // Sync all inputs
+            const inputs = clone.querySelectorAll('input[type="number"]');
+            inputs.forEach(input => {
+                const originalInput = document.getElementById(input.id);
+                if (originalInput) {
+                    input.value = originalInput.value;
+                    input.addEventListener('input', (e) => {
+                        originalInput.value = e.target.value;
+                        originalInput.dispatchEvent(new Event('input', { bubbles: true }));
+                    });
+                }
+            });
+            
+            wrapper.appendChild(clone);
+        }
+    }
+    
+    // If nothing was added, show a message
+    if (wrapper.children.length === 0) {
+        wrapper.innerHTML = '<p style="text-align: center; opacity: 0.7; padding: 20px;">No parameters available for this mode.</p>';
+    }
+    
+    modalParametersContainer.appendChild(wrapper);
+}
+
+// Open modal
+if (settingsBtn) {
+    settingsBtn.addEventListener('click', () => {
+        updateModalParameters();
+        settingsModal.classList.add('active');
+    });
+}
+
+// Close modal
+if (closeSettings) {
+    closeSettings.addEventListener('click', () => {
+        settingsModal.classList.remove('active');
+    });
+}
+
+// Close on outside click
+if (settingsModal) {
+    settingsModal.addEventListener('click', (e) => {
+        if (e.target === settingsModal) {
+            settingsModal.classList.remove('active');
+        }
+    });
+}
+
+// Close on Escape key
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+        if (settingsModal && settingsModal.classList.contains('active')) {
+            settingsModal.classList.remove('active');
+        }
+        if (fileUploadModal && fileUploadModal.classList.contains('active')) {
+            fileUploadModal.classList.remove('active');
+        }
+    }
+});
+
+// Update modal when control mode changes
+if (distanceModeRadio) distanceModeRadio.addEventListener('change', updateModalParameters);
+if (speedModeRadio) speedModeRadio.addEventListener('change', updateModalParameters);
+if (touchModeRadio) touchModeRadio.addEventListener('change', updateModalParameters);
+
+// ========== FILE UPLOAD MODAL ==========
+const fileUploadBtn = document.getElementById('fileUploadBtn');
+const fileUploadModal = document.getElementById('fileUploadModal');
+const closeFileUpload = document.getElementById('closeFileUpload');
+const currentAudioInfo = document.getElementById('currentAudioInfo');
+const audioFileName = document.getElementById('audioFileName');
+const audioDuration = document.getElementById('audioDuration');
+const uploadSection = document.querySelector('.audio-section .upload-section'); // FIX: Target the main upload section
+
+// Function to update audio info display
+function updateAudioInfoDisplay(fileName, duration) {
+    if (currentAudioInfo && audioFileName && audioDuration) {
+        audioFileName.textContent = `File: ${fileName}`;
+        audioDuration.textContent = `Duration: ${formatTime(duration)}`;
+        currentAudioInfo.style.display = 'block';
+    }
+}
+
+// Open file upload modal
+if (fileUploadBtn) {
+    fileUploadBtn.addEventListener('click', () => {
+        fileUploadModal.classList.add('active');
+    });
+}
+
+// Close file upload modal
+if (closeFileUpload) {
+    closeFileUpload.addEventListener('click', () => {
+        fileUploadModal.classList.remove('active');
+    });
+}
+
+// Close on outside click
+if (fileUploadModal) {
+    fileUploadModal.addEventListener('click', (e) => {
+        if (e.target === fileUploadModal) {
+            fileUploadModal.classList.remove('active');
+        }
+    });
+}
+
+// Close on Escape key (update existing listener)
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+        if (settingsModal && settingsModal.classList.contains('active')) {
+            settingsModal.classList.remove('active');
+        }
+        if (fileUploadModal && fileUploadModal.classList.contains('active')) {
+            fileUploadModal.classList.remove('active');
+        }
+    }
+});
+
+// UPDATE: audioFileInput listener
+audioFileInput.addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    stopPlayback();
+
+    const arrayBuffer = await file.arrayBuffer();
+    audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+
+    const fileURL = URL.createObjectURL(file);
+    htmlAudioElement.src = fileURL;
+    htmlAudioElement.preservesPitch = true;
+    htmlAudioElement.mozPreservesPitch = true;
+    htmlAudioElement.webkitPreservesPitch = true;
+
+    seekBar.max = audioBuffer.duration;
+    seekBar.value = 0;
+    pauseTime = 0;
+
+    durationDisplay.textContent = formatTime(audioBuffer.duration);
+    currentTimeDisplay.textContent = formatTime(0);
+
+    controls.style.display = 'block';
+    
+    handleFileLoaded(file.name, audioBuffer.duration);
+});
+
+// ADD: Handle window resize - restore proper state
+window.addEventListener('resize', () => {
+    if (window.innerWidth > 768) {
+        // Desktop: always show upload section, hide button
+        if (uploadSection) {
+            uploadSection.classList.remove('file-loaded');
+            uploadSection.style.display = ''; // Reset to default
+        }
+        if (fileUploadBtn) {
+            fileUploadBtn.classList.remove('show');
+        }
+    } else {
+        // Mobile: restore state if file was loaded
+        if (audioBuffer) {
+            if (uploadSection) {
+                uploadSection.classList.add('file-loaded');
+                uploadSection.style.display = 'none'; // FIX: Hide on mobile
+            }
+            if (fileUploadBtn) {
+                fileUploadBtn.classList.add('show');
+            }
+        }
+    }
 });

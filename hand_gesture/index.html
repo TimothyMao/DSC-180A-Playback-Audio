@@ -29,7 +29,7 @@
                             <video id="inputVideo" autoplay muted playsinline></video>
                             <canvas id="outputCanvas"></canvas>
                             <div class="detection-overlay" id="detectionStatus">
-                                <div id="rotationText">Hold Still</div>
+                                <div id="rotationText">No Rotation</div>
                             </div>
                         </div>
                     </div>
@@ -56,8 +56,84 @@
                             <div class="status-label">Hand Detected</div>
                             <div class="status-value" id="fingerStatus">❌</div>
                         </div>
+                        
+                        <!-- NEW: Volume control status -->
+                        <div class="status-card" id="volumeStatus" style="display: none;">
+                            <div class="status-label">Volume Control</div>
+                            <div class="status-value">
+                                <span id="volumeIcon">🔊</span>
+                                <span id="volumeText">100%</span>
+                            </div>
+                        </div>
                     </div>
                 </div>
+
+                <!-- Touch Control Section HERE - Same level as hand-camera-section -->
+                <div id="touchControlSection" style="display: none;">
+                    <h3>📱 Touch Controls</h3>
+                    
+                    <!-- Fullscreen toggle button -->
+                    <button class="fullscreen-toggle" id="fullscreenToggle" aria-label="Toggle Fullscreen">
+                        <span id="fullscreenIcon">⛶</span>
+                    </button>
+                    
+                    <!-- Touch Area (matches camera viewport position) -->
+                    <div id="touch-control-area">
+                        <div id="touch-indicator"></div>
+                        <div class="touch-placeholder-text">
+                            Touch, tap, or scroll here
+                        </div>
+                    </div>
+                    
+                    <!-- Mode Toggle -->
+                    <div class="touch-mode-toggle">
+                        <label>
+                            <input type="checkbox" id="input-mode-toggle">
+                            <span id="input-mode-label">Tapping/Circling</span>
+                        </label>
+                        <div class="touch-zone-labels">
+                            <span id="left-zone-label">Circles Rewind/Forward 🔄</span>
+                            <span>•</span>
+                            <span id="right-zone-label">Taps Forward</span>
+                        </div>
+                    </div>
+
+                    <!-- Touch Parameters -->
+                    <div class="touch-parameter-group" id="bpm-parameter-group">
+                        <label>
+                            1x BPM Reference: 
+                            <input type="number" id="1x-bpm" value="60" min="30" max="240" step="5">
+                            <span class="param-desc">Base tempo</span>
+                        </label>
+                    </div>
+
+                    <div class="touch-parameter-group">
+                        <label>
+                            Gesture Amplitude: 
+                            <input type="number" id="gesture-amplitude" value="1.0" min="0.1" max="5" step="0.1">
+                            <span class="param-desc">Sensitivity</span>
+                        </label>
+                    </div>
+
+                    <div class="touch-parameter-group">
+                        <label>
+                            Decay Speed (α): 
+                            <input type="number" id="decay-speed" value="0.05" min="0.001" max="0.5" step="0.01">
+                            <span class="param-desc">Return rate</span>
+                        </label>
+                    </div>
+
+                    <!-- Speed Decay Display (for scroll mode) -->
+                    <div id="speed-decay-group" style="display: none;">
+                        <label>
+                            Speed Decay Countdown: 
+                            <span id="speed-decay-label">2.00s</span>
+                        </label>
+                        <input type="range" id="speed-decay-display" min="0" max="8" step="0.01" value="2" disabled>
+                        <span class="param-desc">Time until decay starts</span>
+                    </div>
+                </div>
+                <!-- END Touch Control Section -->
 
                 <!-- Control Mode Toggle -->
                 <div class="control-mode-section">
@@ -75,17 +151,26 @@
                             <strong>Speed Mode</strong>
                             <span class="mode-desc">Fingertip velocity controls speed</span>
                         </label>
+                        <label class="toggle-label">
+                            <input type="radio" name="controlMode" value="touch" id="touchMode">
+                            <span class="radio-custom"></span>
+                            <strong>Touch Mode</strong>
+                            <span class="mode-desc">Touch/mouse/scroll controls</span>
+                        </label>
                     </div>
                 </div>
 
                 <!-- Gesture Instructions -->
                 <div class="gesture-instructions">
-                    <h3>🤚 Hand Gesture Controls</h3>
+                    <h3>🤚 Control Instructions</h3>
                     <div id="distanceModeInstructions" style="display: none;">
                         <ul class="gesture-list">
                             <li><span class="gesture-icon">👆</span> <strong>Point index finger up</strong> to enable gesture control</li>
                             <li><span class="gesture-icon">↻</span> <strong>Rotate clockwise</strong> for forward playback</li>
                             <li><span class="gesture-icon">↺</span> <strong>Rotate counter-clockwise</strong> for backward playback</li>
+                            <li><span class="gesture-icon">🔄</span> <strong>Two full rotations</strong> to start playback</li>
+                            <li><span class="gesture-icon">✋</span> <strong>Open palm (hold 0.3s)</strong> to pause</li>
+                            <li><span class="gesture-icon">🤚</span> <strong>Raise/lower left hand</strong> to control volume</li>
                         </ul>
                     </div>
                     <div id="speedModeInstructions">
@@ -94,6 +179,18 @@
                             <li><span class="gesture-icon">→</span> <strong>Move finger right</strong> for forward playback</li>
                             <li><span class="gesture-icon">←</span> <strong>Move finger left</strong> for backward playback</li>
                             <li><span class="gesture-icon">⊙</span> <strong>Hold still</strong> to drift to default speed</li>
+                            <li><span class="gesture-icon">🔄</span> <strong>Two full rotations</strong> to start playback</li>
+                            <li><span class="gesture-icon">✋</span> <strong>Open palm (hold 0.3s)</strong> to pause</li>
+                            <li><span class="gesture-icon">🤚</span> <strong>Raise/lower left hand</strong> to control volume</li>
+                        </ul>
+                    </div>
+                    <div id="touchModeInstructions" style="display: none;">
+                        <ul class="gesture-list">
+                            <li><span class="gesture-icon">👆</span> <strong>Tap</strong> to set tempo (BPM-based)</li>
+                            <li><span class="gesture-icon">↻</span> <strong>Circle clockwise</strong> for forward playback</li>
+                            <li><span class="gesture-icon">↺</span> <strong>Circle counter-clockwise</strong> for rewind</li>
+                            <li><span class="gesture-icon">🖱️</span> <strong>Scroll</strong> up/down for speed control</li>
+                            <li><span class="gesture-icon">⌨️</span> <strong>Toggle</strong> between tap/scroll modes below</li>
                         </ul>
                     </div>
                 </div>
@@ -106,13 +203,119 @@
                 <h2>🎵 Audio Controls</h2>
                 
                 <h3>📁 Load Audio</h3>
+                
+                <!-- Loading indicator -->
+                <div id="audioLoadingIndicator" class="audio-loading-indicator" style="display: none;">
+                    <div class="loading-spinner"></div>
+                    <span class="loading-text">Loading audio...</span>
+                </div>
+                
                 <div class="upload-section">
                     <input type="file" id="audioFile" accept="audio/*">
                     <button id="loadDefaultBtn" class="load-default-btn">Load Default Audio</button>
                 </div>
 
+                <!-- YouTube URL loader -->
+                <div class="upload-section">
+                    <input
+                        type="url"
+                        id="youtubeUrlInput"
+                        placeholder="Paste YouTube link (requires a backend to fetch audio)"
+                        style="flex: 1; min-width: 0;"
+                    >
+                    <button id="loadYouTubeBtn" class="load-default-btn">Load from YouTube</button>
+                </div>
+                <!-- Transcription Section -->
+                <div class="transcription-section" style="margin-top: 20px;">
+                    <h3>📝 Transcription & Smart Scrubbing</h3>
+                    
+                    <button id="transcribeBtn" class="btn" disabled style="padding: 10px 20px; font-size: 16px; cursor: pointer; background: #4ade80; border: none; border-radius: 8px; color: #000; font-weight: bold;">
+                        🎤 Transcribe Audio
+                    </button>
+                    
+                    <div id="transcriptionStatus" style="display: none; margin-top: 10px; font-style: italic; color: #ffd500;">
+                        <span id="transcriptionStatusText">Processing...</span>
+                    </div>
+
+                    <div id="smartScrubControls" style="display: none; margin-top: 15px; padding: 15px; background: rgba(0,0,0,0.3); border-radius: 8px;">
+                        <h4 style="margin-top: 0;">Smart Scrubbing Settings</h4>
+                        
+                        <div style="margin-bottom: 10px;">
+                            <label>
+                                <input type="checkbox" id="smartScrubToggle">
+                                <strong>Enable Smart Scrub</strong>
+                                <span style="font-size: 0.9em; opacity: 0.8;">(Activates at speeds > 2.0x)</span>
+                            </label>
+                        </div>
+                        
+                        <div style="margin-bottom: 10px;">
+                            <label>
+                                Semantic Threshold: 
+                                <input type="range" id="thresholdSlider" min="50" max="95" value="80" style="width: 150px;">
+                                <span id="thresholdLabel">80th percentile</span>
+                            </label>
+                            <div style="font-size: 0.85em; opacity: 0.7; margin-top: 3px;">
+                                Higher = fewer, more important words
+                            </div>
+                        </div>
+                        
+                        <div style="margin-bottom: 10px;">
+                            <label>
+                                Word Interval: 
+                                <input type="range" id="intervalSlider" min="0" max="1000" step="50" value="0" style="width: 150px;">
+                                <span id="intervalLabel">0ms</span>
+                            </label>
+                            <div style="font-size: 0.85em; opacity: 0.7; margin-top: 3px;">
+                                Gap between words (0 = auto based on speed)
+                            </div>
+                        </div>
+                        
+                        <div style="margin-bottom: 10px;">
+                            <label>
+                                Word Playback Speed: 
+                                <input type="range" id="wordSpeedSlider" min="0.5" max="2" step="0.1" value="1" style="width: 150px;">
+                                <span id="wordSpeedLabel">1.0x</span>
+                            </label>
+                            <div style="font-size: 0.85em; opacity: 0.7; margin-top: 3px;">
+                                Speed for individual word playback
+                            </div>
+                        </div>
+                        
+                        <div style="margin-top: 10px; padding: 10px; background: rgba(255,215,0,0.1); border-radius: 5px;">
+                            <div id="keywordDisplay" style="font-size: 1.3em; color: #ffd500; font-weight: bold; text-align: center;">
+                                No keyword playing
+                            </div>
+                        </div>
+                        
+                        <button id="pauseSmartScrubBtn" style="display: none; margin-top: 10px; padding: 8px 16px; background: #f87171; border: none; border-radius: 5px; cursor: pointer; color: #000; font-weight: bold;">
+                            Pause Smart Scrub
+                        </button>
+                    </div>                    
+                    <div id="transcriptionResult" style="display: none; margin-top: 15px; padding: 15px; background: rgba(0,0,0,0.3); border-radius: 8px; max-height: 400px; overflow-y: auto;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                            <h4 style="margin: 0;">Transcript:</h4>
+                            <button id="copyTranscriptBtn" style="padding: 5px 15px; background: #4ade80; border: none; border-radius: 5px; cursor: pointer; color: #000; font-weight: bold;">
+                                📋 Copy
+                            </button>
+                        </div>
+                        <div id="transcriptionText" style="line-height: 1.6; color: #fff;"></div>
+                    </div>
+                </div>
                 <!-- Hidden HTML5 audio element for pitch-preserving forward playback -->
                 <audio id="htmlAudioElement" style="display: none;" preload="auto"></audio>
+
+                <!-- Video display (shown when video is loaded) -->
+                <div id="videoContainer" style="display: none; margin-bottom: 20px; width: 100%;">
+                    <video 
+                        id="htmlVideoElement" 
+                        style="width: 100%; max-width: 640px; height: auto; border-radius: 8px; background: #000; display: block; pointer-events: none;"
+                        preload="auto"
+                        playsinline
+                        muted
+                        disablePictureInPicture
+                        controlsList="nodownload nofullscreen noremoteplayback"
+                    ></video>
+                </div>
 
                 <div id="controls" style="display: none;">
                     <div class="time-section">
@@ -235,7 +438,7 @@
                         <button id="resetBtn">Reset</button>
                     </div>
 
-                    <div>
+                    <div class="how-it-works-section">
                         <h3>📊 How it works:</h3>
                         <p>• <strong>Input Speed:</strong> Controlled by hand gestures (raw input)</p>
                         <p>• <strong>Playback Speed:</strong> Smoothed speed (what you hear)</p>
@@ -252,14 +455,57 @@
         </div>
     </div>
 
+    <!-- Settings Button -->
+    <button class="settings-button" id="settingsBtn" aria-label="Settings">⚙️</button>
+
+    <!-- ADD: File Upload Button (mobile only) -->
+    <button class="file-upload-button" id="fileUploadBtn" aria-label="Load Audio">📁</button>
+
+    <!-- Settings Modal -->
+    <div class="settings-modal" id="settingsModal">
+        <div class="settings-content">
+            <div class="settings-header">
+                <h2>⚙️ Parameters</h2>
+                <button class="close-settings" id="closeSettings" aria-label="Close">×</button>
+            </div>
+            
+            <!-- Parameters will be moved here by JavaScript -->
+            <div id="modalParametersContainer"></div>
+        </div>
+    </div>
+
+    <!-- ADD: File Upload Modal -->
+    <div class="settings-modal" id="fileUploadModal">
+        <div class="settings-content">
+            <div class="settings-header">
+                <h2>📁 Load Audio</h2>
+                <button class="close-settings" id="closeFileUpload" aria-label="Close">×</button>
+            </div>
+            
+            <div class="settings-section">
+                <div class="upload-section" id="modalUploadSection">
+                    <input type="file" id="audioFile" accept="audio/*">
+                    <button id="loadDefaultBtn" class="load-default-btn">Load Default Audio</button>
+                </div>
+                
+                <div id="currentAudioInfo" style="display: none; margin-top: 20px; padding: 15px; background: rgba(74, 222, 128, 0.2); border-radius: 10px; border: 2px solid #4ade80;">
+                    <h3 style="margin: 0 0 10px 0; color: #4ade80;">✓ Audio Loaded</h3>
+                    <p style="margin: 5px 0; opacity: 0.9;" id="audioFileName">File: example.mp3</p>
+                    <p style="margin: 5px 0; opacity: 0.9;" id="audioDuration">Duration: 0:00</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Load MediaPipe from CDN -->
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation/selfie_segmentation.js" crossorigin="anonymous"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/howler/2.2.4/howler.min.js"></script>
 
-    <!-- Load our custom script -->
+    <script src="touchControl.js"></script>
     <script src="script.js"></script>
 </body>
 </html>
