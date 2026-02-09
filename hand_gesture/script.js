@@ -205,11 +205,17 @@ let manualThresholdPercentile = null;
 let hasUserAdjustedThreshold = false;
 let userIntervalMs = 0;
 let wordPlaybackSpeed = 1.0;
+let scrubStartSpeed = 1.9; // Forward smart scrub threshold
+let bwScrubStartSpeed = 1.9; // Backward smart scrub threshold (absolute value)
 
-const SMART_SCRUB_SPEED_THRESHOLD = 2.0;
 const WORD_OVERLAP_MS = 100;
 let wordHowl = null;
 let wordHowlUrl = null;
+let backwardSmartScrubTimer = null;
+let bwNextWordIndex = 0;
+const MAX_OVERLAP_SOURCES = 3;
+let activeWordHowlIds = [];
+const PRE_ROLL_SEC = 0.05;
 
 // Smart scrub DOM elements
 const smartScrubToggle = document.getElementById('smartScrubToggle');
@@ -222,6 +228,13 @@ const wordSpeedSlider = document.getElementById('wordSpeedSlider');
 const wordSpeedLabel = document.getElementById('wordSpeedLabel');
 const keywordDisplay = document.getElementById('keywordDisplay');
 const pauseSmartScrubBtn = document.getElementById('pauseSmartScrubBtn');
+const overlapSourcesSlider = document.getElementById('overlapSourcesSlider');
+const overlapSourcesLabel = document.getElementById('overlapSourcesLabel');
+const scrubStartSpeedSlider = document.getElementById('scrubStartSpeedSlider');
+const scrubStartSpeedLabel = document.getElementById('scrubStartSpeedLabel');
+const bwScrubStartSpeedSlider = document.getElementById('bwScrubStartSpeedSlider');
+const bwScrubStartSpeedLabel = document.getElementById('bwScrubStartSpeedLabel');
+const wordPlayer = document.getElementById('wordPlayer');
 
 // Common words to filter out
 const commonWords = new Set([
@@ -577,13 +590,23 @@ let wordPlayerPoolIndex = 0;
 function ensureWordPlayerPoolInitialized() {
     if (wordPlayers.length > 0) return;
     
-    // Create initial player (will be cloned)
-    const initialPlayer = new Audio();
-    initialPlayer.preservesPitch = true;
-    initialPlayer.mozPreservesPitch = true;
-    initialPlayer.webkitPreservesPitch = true;
-    initialPlayer.volume = 1.0;
-    wordPlayers.push(initialPlayer);
+    // Use the HTML word player element as the base
+    if (wordPlayer) {
+        wordPlayer.volume = 1.0;
+        wordPlayer.muted = false;
+        wordPlayer.preservesPitch = true;
+        wordPlayer.mozPreservesPitch = true;
+        wordPlayer.webkitPreservesPitch = true;
+        wordPlayers.push(wordPlayer);
+    } else {
+        // Fallback: create a new audio element
+        const initialPlayer = new Audio();
+        initialPlayer.preservesPitch = true;
+        initialPlayer.mozPreservesPitch = true;
+        initialPlayer.webkitPreservesPitch = true;
+        initialPlayer.volume = 1.0;
+        wordPlayers.push(initialPlayer);
+    }
 }
 
 function resizeWordPlayerPool(newSize) {
@@ -666,14 +689,23 @@ function playWordWithHowler(startSec, durationMs) {
 
     try {
         const baseFadeMs = 180;
-        const fadeMs = baseFadeMs;
-        const actualDurationMs = durationMs;
-        const PRE_ROLL_SEC = 0.05;
+        const fadeMs = baseFadeMs / wordPlaybackSpeed;
+        const actualDurationMs = durationMs / wordPlaybackSpeed;
         const seekTarget = Math.max(0, startSec - PRE_ROLL_SEC);
 
         const id = wordHowl.play();
+        activeWordHowlIds.push(id);
         
-        wordHowl.rate(1.0, id);
+        // Clean up old sources if too many
+        if (activeWordHowlIds.length > MAX_OVERLAP_SOURCES) {
+            const oldestId = activeWordHowlIds.shift();
+            try {
+                wordHowl.fade(wordHowl.volume(oldestId), 0, fadeMs, oldestId);
+                setTimeout(() => { try { wordHowl.stop(oldestId); } catch {} }, fadeMs + 20);
+            } catch {}
+        }
+        
+        wordHowl.rate(wordPlaybackSpeed, id);
         wordHowl.volume(0, id);
         wordHowl.seek(seekTarget, id);
         wordHowl.fade(0, 1, fadeMs, id);
@@ -684,6 +716,7 @@ function playWordWithHowler(startSec, durationMs) {
 
         setTimeout(() => {
             try { wordHowl.stop(id); } catch {}
+            activeWordHowlIds = activeWordHowlIds.filter(x => x !== id);
         }, actualDurationMs + fadeMs + 30);
 
         return true;
@@ -804,6 +837,34 @@ if (wordSpeedSlider) {
         const val = parseFloat(wordSpeedSlider.value);
         wordPlaybackSpeed = val;
         wordSpeedLabel.textContent = `${val.toFixed(1)}x`;
+    });
+}
+
+if (overlapSourcesSlider) {
+    overlapSourcesSlider.addEventListener('input', () => {
+        const val = Math.round(parseInt(overlapSourcesSlider.value, 10) || 1);
+        overlapSourcesLabel.textContent = `${val}`;
+        wordPlayerPoolSize = val;
+        resizeWordPlayerPool(wordPlayerPoolSize);
+        if (wordHowlUrl && wordPlayer) {
+            wordPlayer.src = wordHowlUrl;
+        }
+    });
+}
+
+if (scrubStartSpeedSlider) {
+    scrubStartSpeedSlider.addEventListener('input', () => {
+        const val = parseFloat(scrubStartSpeedSlider.value);
+        scrubStartSpeed = val - 0.1;
+        scrubStartSpeedLabel.textContent = `${val.toFixed(1)}x`;
+    });
+}
+
+if (bwScrubStartSpeedSlider) {
+    bwScrubStartSpeedSlider.addEventListener('input', () => {
+        const val = parseFloat(bwScrubStartSpeedSlider.value);
+        bwScrubStartSpeed = Math.abs(val) - 0.1;
+        bwScrubStartSpeedLabel.textContent = `${val.toFixed(1)}x`;
     });
 }
 
@@ -1993,6 +2054,39 @@ async function loadAudioFromUrl(audioUrl, loadingMessage = 'Loading audio...', v
             }
             
             audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+            
+            // Initialize Howler for smart scrub word playback
+            try {
+                if (wordHowl) {
+                    wordHowl.unload();
+                    wordHowl = null;
+                }
+                if (wordHowlUrl) {
+                    URL.revokeObjectURL(wordHowlUrl);
+                    wordHowlUrl = null;
+                }
+                
+                // Create blob URL for Howler
+                const blob = new Blob([arrayBuffer], { type: 'audio/mpeg' });
+                wordHowlUrl = URL.createObjectURL(blob);
+                wordHowl = new Howl({
+                    src: [wordHowlUrl],
+                    html5: false,
+                    preload: true,
+                    onloaderror: (id, err) => console.error('Howler load error', err),
+                    onplayerror: (id, err) => console.error('Howler play error', err)
+                });
+                
+                // Initialize word player pool
+                initWordPlayerPool();
+                if (wordPlayer) {
+                    wordPlayer.src = wordHowlUrl;
+                }
+                
+                console.log('Howler and word player pool initialized for smart scrub');
+            } catch (howlerError) {
+                console.warn('Failed to initialize Howler (smart scrub may have degraded performance):', howlerError);
+            }
         } catch (bufferError) {
             // If AudioBuffer creation fails, but the HTML audio element loaded successfully,
             // we can still use the audio element for playback (forward only)
@@ -2150,6 +2244,39 @@ audioFileInput.addEventListener('change', async (e) => {
 
         const arrayBuffer = await file.arrayBuffer();
         audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+        
+        // Initialize Howler for smart scrub word playback
+        try {
+            if (wordHowl) {
+                wordHowl.unload();
+                wordHowl = null;
+            }
+            if (wordHowlUrl) {
+                URL.revokeObjectURL(wordHowlUrl);
+                wordHowlUrl = null;
+            }
+            
+            // Create blob URL for Howler
+            const blob = new Blob([arrayBuffer], { type: file.type || 'audio/mpeg' });
+            wordHowlUrl = URL.createObjectURL(blob);
+            wordHowl = new Howl({
+                src: [wordHowlUrl],
+                html5: false,
+                preload: true,
+                onloaderror: (id, err) => console.error('Howler load error', err),
+                onplayerror: (id, err) => console.error('Howler play error', err)
+            });
+            
+            // Initialize word player pool
+            initWordPlayerPool();
+            if (wordPlayer) {
+                wordPlayer.src = wordHowlUrl;
+            }
+            
+            console.log('Howler and word player pool initialized for smart scrub');
+        } catch (howlerError) {
+            console.warn('Failed to initialize Howler (smart scrub may have degraded performance):', howlerError);
+        }
 
         const fileURL = URL.createObjectURL(file);
         htmlAudioElement.src = fileURL;
@@ -2656,19 +2783,30 @@ function updateFilteredSpeed() {
 
     previousGestureTarget = gestureTarget;
 
+    // Smart Scrub threshold checking
     if (smartScrubEnabled && isPlaying && !manuallyPaused && informativeWords.length > 0) {
-    const speed = Math.abs(filteredSpeed);
-    
-    if (speed >= SMART_SCRUB_SPEED_THRESHOLD && !smartScrubActive) {
-        // Speed crossed threshold - activate smart scrub
-        console.log('Activating smart scrub at speed:', filteredSpeed.toFixed(2));
-        recalcInformative(true);
-        startSmartScrub();
-    } else if (speed < SMART_SCRUB_SPEED_THRESHOLD && smartScrubActive) {
-        // Speed dropped below threshold - deactivate
-        console.log('Deactivating smart scrub at speed:', filteredSpeed.toFixed(2));
-        stopSmartScrub();
-    }
+        const absSpeed = Math.abs(filteredSpeed);
+        const isForward = filteredSpeed >= 0;
+        
+        if (isForward && absSpeed > scrubStartSpeed && !smartScrubActive) {
+            // Forward speed crossed threshold - activate smart scrub
+            console.log('Activating forward smart scrub at speed:', filteredSpeed.toFixed(2));
+            recalcInformative(true);
+            startSmartScrub();
+        } else if (!isForward && absSpeed > bwScrubStartSpeed && !smartScrubActive) {
+            // Backward speed crossed threshold - activate smart scrub
+            console.log('Activating backward smart scrub at speed:', filteredSpeed.toFixed(2));
+            recalcInformative(true);
+            startSmartScrub(); // Use same function, it handles reverse via filteredSpeed sign
+        } else if (isForward && absSpeed <= scrubStartSpeed && smartScrubActive) {
+            // Forward speed dropped below threshold - deactivate
+            console.log('Deactivating forward smart scrub at speed:', filteredSpeed.toFixed(2));
+            stopSmartScrub();
+        } else if (!isForward && absSpeed <= bwScrubStartSpeed && smartScrubActive) {
+            // Backward speed dropped below threshold - deactivate
+            console.log('Deactivating backward smart scrub at speed:', filteredSpeed.toFixed(2));
+            stopSmartScrub();
+        }
     }
 
     const diff = Math.abs(gestureTarget - filteredSpeed);

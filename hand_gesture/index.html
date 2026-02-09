@@ -281,6 +281,39 @@
                             </div>
                         </div>
                         
+                        <div style="margin-bottom: 10px;">
+                            <label>
+                                Overlap Sources: 
+                                <input type="range" id="overlapSourcesSlider" min="1" max="6" step="1" value="2" style="width: 150px;">
+                                <span id="overlapSourcesLabel">2</span>
+                            </label>
+                            <div style="font-size: 0.85em; opacity: 0.7; margin-top: 3px;">
+                                Max simultaneous word playbacks
+                            </div>
+                        </div>
+                        
+                        <div style="margin-bottom: 10px;">
+                            <label>
+                                Forward Scrub Start Speed: 
+                                <input type="range" id="scrubStartSpeedSlider" min="1.5" max="3.0" step="0.1" value="2.0" style="width: 150px;">
+                                <span id="scrubStartSpeedLabel">2.0x</span>
+                            </label>
+                            <div style="font-size: 0.85em; opacity: 0.7; margin-top: 3px;">
+                                Speed threshold to activate forward smart scrub
+                            </div>
+                        </div>
+                        
+                        <div style="margin-bottom: 10px;">
+                            <label>
+                                Backward Scrub Start Speed: 
+                                <input type="range" id="bwScrubStartSpeedSlider" min="-3.0" max="-1.5" step="0.1" value="-2.0" style="width: 150px;">
+                                <span id="bwScrubStartSpeedLabel">-2.0x</span>
+                            </label>
+                            <div style="font-size: 0.85em; opacity: 0.7; margin-top: 3px;">
+                                Speed threshold to activate backward smart scrub
+                            </div>
+                        </div>
+                        
                         <div style="margin-top: 10px; padding: 10px; background: rgba(255,215,0,0.1); border-radius: 5px;">
                             <div id="keywordDisplay" style="font-size: 1.3em; color: #ffd500; font-weight: bold; text-align: center;">
                                 No keyword playing
@@ -496,6 +529,9 @@
             </div>
         </div>
     </div>
+
+    <!-- Hidden audio element for word playback -->
+    <audio id="wordPlayer" style="display: none;"></audio>
 
     <!-- Load MediaPipe from CDN -->
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
