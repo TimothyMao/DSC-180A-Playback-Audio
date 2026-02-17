@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Hand-Controlled Audio Player</title>
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="styles.css">
 </head>
 <body>
     <!-- Main Container with Two-Column Layout -->
@@ -31,6 +31,17 @@
                             <div class="detection-overlay" id="detectionStatus">
                                 <div id="rotationText">No Rotation</div>
                             </div>
+                        </div>
+                    </div>
+
+                    <!-- Confusion Meter placed directly beneath camera feed -->
+                    <div id="confusionMeter" class="confusion-meter" style="display: none; margin-top: 15px;">
+                        <div class="confusion-label">Confusion Level</div>
+                        <div class="confusion-bar">
+                            <div id="confusionFill" class="confusion-fill" style="width: 0%;"></div>
+                        </div>
+                        <div class="confusion-decay-info">
+                            <small style="color: rgba(255,255,255,0.7); display: block; margin-top: 8px; text-align: center;">Higher confusion = slower decay</small>
                         </div>
                     </div>
                     
@@ -71,12 +82,12 @@
                 <!-- Touch Control Section HERE - Same level as hand-camera-section -->
                 <div id="touchControlSection" style="display: none;">
                     <h3>📱 Touch Controls</h3>
-                    
+
                     <!-- Fullscreen toggle button -->
                     <button class="fullscreen-toggle" id="fullscreenToggle" aria-label="Toggle Fullscreen">
                         <span id="fullscreenIcon">⛶</span>
                     </button>
-                    
+
                     <!-- Touch Area (matches camera viewport position) -->
                     <div id="touch-control-area">
                         <div id="touch-indicator"></div>
@@ -84,7 +95,7 @@
                             Touch, tap, or scroll here
                         </div>
                     </div>
-                    
+
                     <!-- Mode Toggle -->
                     <div class="touch-mode-toggle">
                         <label>
@@ -98,100 +109,163 @@
                         </div>
                     </div>
 
-                    <!-- Touch Parameters -->
-                    <div class="touch-parameter-group" id="bpm-parameter-group">
-                        <label>
-                            1x BPM Reference: 
-                            <input type="number" id="1x-bpm" value="60" min="30" max="240" step="5">
-                            <span class="param-desc">Base tempo</span>
-                        </label>
-                    </div>
+                    <!-- Touch Parameters (Collapsible) -->
+                    <div class="collapsible-section collapsed" style="margin-top: 15px;">
+                        <div class="collapsible-header" onclick="this.parentElement.classList.toggle('collapsed')">
+                            <h3>Touch Parameters</h3>
+                            <span class="collapsible-arrow">▼</span>
+                        </div>
+                        <div class="collapsible-content">
+                            <div class="touch-parameter-group" id="bpm-parameter-group">
+                                <label>
+                                    1x BPM Reference:
+                                    <input type="number" id="1x-bpm" value="60" min="30" max="240" step="5">
+                                    <span class="param-desc">Base tempo</span>
+                                </label>
+                            </div>
 
-                    <div class="touch-parameter-group">
-                        <label>
-                            Gesture Amplitude: 
-                            <input type="number" id="gesture-amplitude" value="1.0" min="0.1" max="5" step="0.1">
-                            <span class="param-desc">Sensitivity</span>
-                        </label>
-                    </div>
+                            <div class="touch-parameter-group">
+                                <label>
+                                    Gesture Amplitude:
+                                    <input type="number" id="gesture-amplitude" value="1.0" min="0.1" max="5" step="0.1">
+                                    <span class="param-desc">Sensitivity</span>
+                                </label>
+                            </div>
 
-                    <div class="touch-parameter-group">
-                        <label>
-                            Decay Speed (α): 
-                            <input type="number" id="decay-speed" value="0.05" min="0.001" max="0.5" step="0.01">
-                            <span class="param-desc">Return rate</span>
-                        </label>
-                    </div>
+                            <!-- Touch Alpha Parameter -->
+                            <div class="touch-parameter-group">
+                                <label>
+                                    Touch Alpha (α):
+                                    <span id="touch-alpha-value" style="font-weight: bold; color: #a78bfa;">0.010</span>
+                                </label>
+                                <input type="number" id="touch-alpha-input" value="0.01" min="0.001" max="1" step="0.001" style="width: 80px;">
+                                <span class="param-desc">Smoothing speed (higher = faster response)</span>
+                            </div>
 
-                    <!-- Speed Decay Display (for scroll mode) -->
-                    <div id="speed-decay-group" style="display: none;">
-                        <label>
-                            Speed Decay Countdown: 
-                            <span id="speed-decay-label">2.00s</span>
-                        </label>
-                        <input type="range" id="speed-decay-display" min="0" max="8" step="0.01" value="2" disabled>
-                        <span class="param-desc">Time until decay starts</span>
+                            <div class="touch-parameter-group">
+                                <label>
+                                    Decay Speed (α):
+                                    <input type="number" id="decay-speed" value="0.05" min="0.001" max="0.5" step="0.01">
+                                    <span class="param-desc">Return rate</span>
+                                </label>
+                            </div>
+
+                            <!-- Speed Decay Display (for scroll mode) -->
+                            <div id="speed-decay-group" style="display: none;">
+                                <label>
+                                    Speed Decay Countdown:
+                                    <span id="speed-decay-label">2.00s</span>
+                                </label>
+                                <input type="range" id="speed-decay-display" min="0" max="8" step="0.01" value="2" disabled>
+                                <span class="param-desc">Time until decay starts</span>
+                            </div>
+                        </div>
                     </div>
                 </div>
                 <!-- END Touch Control Section -->
 
+                <!-- Face Recognition Toggle -->
+                <div class="face-recognition-section collapsible-section">
+                    <div class="collapsible-header" onclick="this.parentElement.classList.toggle('collapsed')">
+                        <h3>👤 Facial Expressions Recognition</h3>
+                        <span class="collapsible-arrow">▼</span>
+                    </div>
+                    <div class="collapsible-content">
+                        <div class="face-recognition-toggle">
+                            <label class="toggle-label">
+                                <input type="checkbox" id="faceRecognitionToggle">
+                                <span class="radio-custom" style="width: 24px; height: 24px; border: 2px solid #ffd700; border-radius: 4px; position: relative; flex-shrink: 0;"></span>
+                                <strong>Enable Face Control</strong>
+                                <span class="mode-desc">Confusion adjusts decay speed</span>
+                            </label>
+                        </div>
+
+                        <div id="confusionControls" class="face-parameter-group" style="display: none;">
+                            <label for="confusionSlowdownInput">
+                                Slowdown Sensitivity
+                                <span id="confusionSlowdownValue">1.00x</span>
+                            </label>
+                            <input type="number" id="confusionSlowdownInput" min="0.5" max="2" step="0.05" value="1">
+                            <span class="param-desc">Lower = gentle decay, higher = aggressive slowdown (0.50-2.00)</span>
+
+                            <div class="switch-container">
+                                <span class="switch-label">Show Face Trace</span>
+                                <label class="switch">
+                                    <input type="checkbox" id="faceTraceToggle" checked>
+                                    <span class="switch-slider"></span>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Control Mode Toggle -->
-                <div class="control-mode-section">
-                    <h3>🎛️ Control Mode</h3>
-                    <div class="mode-toggle">
-                        <label class="toggle-label">
-                            <input type="radio" name="controlMode" value="distance" id="distanceMode">
-                            <span class="radio-custom"></span>
-                            <strong>Distance Mode</strong>
-                            <span class="mode-desc">Rotation controls speed</span>
-                        </label>
-                        <label class="toggle-label">
-                            <input type="radio" name="controlMode" value="speed" id="speedMode" checked>
-                            <span class="radio-custom"></span>
-                            <strong>Speed Mode</strong>
-                            <span class="mode-desc">Fingertip velocity controls speed</span>
-                        </label>
-                        <label class="toggle-label">
-                            <input type="radio" name="controlMode" value="touch" id="touchMode">
-                            <span class="radio-custom"></span>
-                            <strong>Touch Mode</strong>
-                            <span class="mode-desc">Touch/mouse/scroll controls</span>
-                        </label>
+                <div class="control-mode-section collapsible-section">
+                    <div class="collapsible-header" onclick="this.parentElement.classList.toggle('collapsed')">
+                        <h3>🎛️ Control Mode</h3>
+                        <span class="collapsible-arrow">▼</span>
+                    </div>
+                    <div class="collapsible-content">
+                        <div class="mode-toggle">
+                            <label class="toggle-label">
+                                <input type="radio" name="controlMode" value="distance" id="distanceMode">
+                                <span class="radio-custom"></span>
+                                <strong>Distance Mode</strong>
+                                <span class="mode-desc">Rotation controls speed</span>
+                            </label>
+                            <label class="toggle-label">
+                                <input type="radio" name="controlMode" value="speed" id="speedMode" checked>
+                                <span class="radio-custom"></span>
+                                <strong>Speed Mode</strong>
+                                <span class="mode-desc">Fingertip velocity controls speed</span>
+                            </label>
+                            <label class="toggle-label">
+                                <input type="radio" name="controlMode" value="touch" id="touchMode">
+                                <span class="radio-custom"></span>
+                                <strong>Touch Mode</strong>
+                                <span class="mode-desc">Touch/mouse/scroll controls</span>
+                            </label>
+                        </div>
                     </div>
                 </div>
 
                 <!-- Gesture Instructions -->
-                <div class="gesture-instructions">
-                    <h3>🤚 Control Instructions</h3>
-                    <div id="distanceModeInstructions" style="display: none;">
-                        <ul class="gesture-list">
-                            <li><span class="gesture-icon">👆</span> <strong>Point index finger up</strong> to enable gesture control</li>
-                            <li><span class="gesture-icon">↻</span> <strong>Rotate clockwise</strong> for forward playback</li>
-                            <li><span class="gesture-icon">↺</span> <strong>Rotate counter-clockwise</strong> for backward playback</li>
-                            <li><span class="gesture-icon">🔄</span> <strong>Two full rotations</strong> to start playback</li>
-                            <li><span class="gesture-icon">✋</span> <strong>Open palm (hold 0.3s)</strong> to pause</li>
-                            <li><span class="gesture-icon">🤚</span> <strong>Raise/lower left hand</strong> to control volume</li>
-                        </ul>
+                <div class="gesture-instructions collapsible-section collapsed">
+                    <div class="collapsible-header" onclick="this.parentElement.classList.toggle('collapsed')">
+                        <h3>🤚 Control Instructions</h3>
+                        <span class="collapsible-arrow">▼</span>
                     </div>
-                    <div id="speedModeInstructions">
-                        <ul class="gesture-list">
-                            <li><span class="gesture-icon">👆</span> <strong>Point index finger up</strong> to enable gesture control</li>
-                            <li><span class="gesture-icon">→</span> <strong>Move finger right</strong> for forward playback</li>
-                            <li><span class="gesture-icon">←</span> <strong>Move finger left</strong> for backward playback</li>
-                            <li><span class="gesture-icon">⊙</span> <strong>Hold still</strong> to drift to default speed</li>
-                            <li><span class="gesture-icon">🔄</span> <strong>Two full rotations</strong> to start playback</li>
-                            <li><span class="gesture-icon">✋</span> <strong>Open palm (hold 0.3s)</strong> to pause</li>
-                            <li><span class="gesture-icon">🤚</span> <strong>Raise/lower left hand</strong> to control volume</li>
-                        </ul>
-                    </div>
-                    <div id="touchModeInstructions" style="display: none;">
-                        <ul class="gesture-list">
-                            <li><span class="gesture-icon">👆</span> <strong>Tap</strong> to set tempo (BPM-based)</li>
-                            <li><span class="gesture-icon">↻</span> <strong>Circle clockwise</strong> for forward playback</li>
-                            <li><span class="gesture-icon">↺</span> <strong>Circle counter-clockwise</strong> for rewind</li>
-                            <li><span class="gesture-icon">🖱️</span> <strong>Scroll</strong> up/down for speed control</li>
-                            <li><span class="gesture-icon">⌨️</span> <strong>Toggle</strong> between tap/scroll modes below</li>
-                        </ul>
+                    <div class="collapsible-content">
+                        <div id="distanceModeInstructions" style="display: none;">
+                            <ul class="gesture-list">
+                                <li><span class="gesture-icon">👆</span> <strong>Point index finger up</strong> to enable gesture control</li>
+                                <li><span class="gesture-icon">↻</span> <strong>Rotate clockwise</strong> for forward playback</li>
+                                <li><span class="gesture-icon">↺</span> <strong>Rotate counter-clockwise</strong> for backward playback</li>
+                                <li><span class="gesture-icon">🔄</span> <strong>Two full rotations</strong> to start playback</li>
+                                <li><span class="gesture-icon">✋</span> <strong>Open palm (hold 0.3s)</strong> to pause</li>
+                                <li><span class="gesture-icon">🤚</span> <strong>Raise/lower left hand</strong> to control volume</li>
+                            </ul>
+                        </div>
+                        <div id="speedModeInstructions">
+                            <ul class="gesture-list">
+                                <li><span class="gesture-icon">👆</span> <strong>Point index finger up</strong> to enable gesture control</li>
+                                <li><span class="gesture-icon">→</span> <strong>Move finger right</strong> for forward playback</li>
+                                <li><span class="gesture-icon">←</span> <strong>Move finger left</strong> for backward playback</li>
+                                <li><span class="gesture-icon">⊙</span> <strong>Hold still</strong> to drift to default speed</li>
+                                <li><span class="gesture-icon">🔄</span> <strong>Two full rotations</strong> to start playback</li>
+                                <li><span class="gesture-icon">✋</span> <strong>Open palm (hold 0.3s)</strong> to pause</li>
+                                <li><span class="gesture-icon">🤚</span> <strong>Raise/lower left hand</strong> to control volume</li>
+                            </ul>
+                        </div>
+                        <div id="touchModeInstructions" style="display: none;">
+                            <ul class="gesture-list">
+                                <li><span class="gesture-icon">👆</span> <strong>Tap</strong> to set tempo (BPM-based)</li>
+                                <li><span class="gesture-icon">↻</span> <strong>Circle clockwise</strong> for forward playback</li>
+                                <li><span class="gesture-icon">↺</span> <strong>Circle counter-clockwise</strong> for rewind</li>
+                                <li><span class="gesture-icon">🖱️</span> <strong>Scroll</strong> up/down for speed control</li>
+                                <li><span class="gesture-icon">⌨️</span> <strong>Toggle</strong> between tap/scroll modes below</li>
+                            </ul>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -225,82 +299,9 @@
                     >
                     <button id="loadYouTubeBtn" class="load-default-btn">Load from YouTube</button>
                 </div>
-                <!-- Transcription Section -->
-                <div class="transcription-section" style="margin-top: 20px;">
-                    <h3>📝 Transcription & Smart Scrubbing</h3>
-                    
-                    <button id="transcribeBtn" class="btn" disabled style="padding: 10px 20px; font-size: 16px; cursor: pointer; background: #4ade80; border: none; border-radius: 8px; color: #000; font-weight: bold;">
-                        🎤 Transcribe Audio
-                    </button>
-                    
-                    <div id="transcriptionStatus" style="display: none; margin-top: 10px; font-style: italic; color: #ffd500;">
-                        <span id="transcriptionStatusText">Processing...</span>
-                    </div>
 
-                    <div id="smartScrubControls" style="display: none; margin-top: 15px; padding: 15px; background: rgba(0,0,0,0.3); border-radius: 8px;">
-                        <h4 style="margin-top: 0;">Smart Scrubbing Settings</h4>
-                        
-                        <div style="margin-bottom: 10px;">
-                            <label>
-                                <input type="checkbox" id="smartScrubToggle">
-                                <strong>Enable Smart Scrub</strong>
-                                <span style="font-size: 0.9em; opacity: 0.8;">(Activates at speeds > 2.0x)</span>
-                            </label>
-                        </div>
-                        
-                        <div style="margin-bottom: 10px;">
-                            <label>
-                                Semantic Threshold: 
-                                <input type="range" id="thresholdSlider" min="50" max="95" value="80" style="width: 150px;">
-                                <span id="thresholdLabel">80th percentile</span>
-                            </label>
-                            <div style="font-size: 0.85em; opacity: 0.7; margin-top: 3px;">
-                                Higher = fewer, more important words
-                            </div>
-                        </div>
-                        
-                        <div style="margin-bottom: 10px;">
-                            <label>
-                                Word Interval: 
-                                <input type="range" id="intervalSlider" min="0" max="1000" step="50" value="0" style="width: 150px;">
-                                <span id="intervalLabel">0ms</span>
-                            </label>
-                            <div style="font-size: 0.85em; opacity: 0.7; margin-top: 3px;">
-                                Gap between words (0 = auto based on speed)
-                            </div>
-                        </div>
-                        
-                        <div style="margin-bottom: 10px;">
-                            <label>
-                                Word Playback Speed: 
-                                <input type="range" id="wordSpeedSlider" min="0.5" max="2" step="0.1" value="1" style="width: 150px;">
-                                <span id="wordSpeedLabel">1.0x</span>
-                            </label>
-                            <div style="font-size: 0.85em; opacity: 0.7; margin-top: 3px;">
-                                Speed for individual word playback
-                            </div>
-                        </div>
-                        
-                        <div style="margin-top: 10px; padding: 10px; background: rgba(255,215,0,0.1); border-radius: 5px;">
-                            <div id="keywordDisplay" style="font-size: 1.3em; color: #ffd500; font-weight: bold; text-align: center;">
-                                No keyword playing
-                            </div>
-                        </div>
-                        
-                        <button id="pauseSmartScrubBtn" style="display: none; margin-top: 10px; padding: 8px 16px; background: #f87171; border: none; border-radius: 5px; cursor: pointer; color: #000; font-weight: bold;">
-                            Pause Smart Scrub
-                        </button>
-                    </div>                    
-                    <div id="transcriptionResult" style="display: none; margin-top: 15px; padding: 15px; background: rgba(0,0,0,0.3); border-radius: 8px; max-height: 400px; overflow-y: auto;">
-                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                            <h4 style="margin: 0;">Transcript:</h4>
-                            <button id="copyTranscriptBtn" style="padding: 5px 15px; background: #4ade80; border: none; border-radius: 5px; cursor: pointer; color: #000; font-weight: bold;">
-                                📋 Copy
-                            </button>
-                        </div>
-                        <div id="transcriptionText" style="line-height: 1.6; color: #fff;"></div>
-                    </div>
-                </div>
+
+
                 <!-- Hidden HTML5 audio element for pitch-preserving forward playback -->
                 <audio id="htmlAudioElement" style="display: none;" preload="auto"></audio>
 
@@ -348,86 +349,176 @@
                         </div>
 
                         <!-- Dynamic Alpha Display and Controls -->
-                        <div class="alpha-section" style="margin-top: 15px; padding: 15px; background: rgba(0, 0, 0, 0.2); border-radius: 8px;">
-                            <h4 style="margin-top: 0;">Smoothing Parameters</h4>
-                            
-                            <div class="alpha-status" style="margin-bottom: 15px; padding: 10px; background: rgba(0, 0, 0, 0.3); border-radius: 5px;">
-                                <div style="display: flex; justify-content: space-between; align-items: center;">
-                                    <span><strong>Active Alpha:</strong></span>
-                                    <span id="activeAlphaDisplay" style="font-size: 1.2em; font-weight: bold; color: #4ade80;">0.0100</span>
+                        <div class="alpha-section collapsible-section collapsed" style="margin-top: 15px;">
+                            <div class="collapsible-header" onclick="this.parentElement.classList.toggle('collapsed')">
+                                <h3>Smoothing Parameters</h3>
+                                <span class="collapsible-arrow">▼</span>
+                            </div>
+                            <div class="collapsible-content">
+                                <div class="alpha-status" style="margin-bottom: 15px; padding: 10px; background: rgba(0, 0, 0, 0.3); border-radius: 5px;">
+                                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                                        <span><strong>Active Alpha:</strong></span>
+                                        <span id="activeAlphaDisplay" style="font-size: 1.2em; font-weight: bold; color: #4ade80;">0.0500</span>
+                                    </div>
+                                    <div style="margin-top: 5px; font-size: 0.9em; color: #aaa;">
+                                        <span id="alphaStateText">Hand detected - Responsive mode</span>
+                                    </div>
                                 </div>
-                                <div style="margin-top: 5px; font-size: 0.9em; color: #aaa;">
-                                    <span id="alphaStateText">Hand detected - Responsive mode</span>
+
+                                <div style="margin-bottom: 10px;">
+                                    <label for="alphaFingerInput">
+                                        Alpha (Finger Detected):
+                                        <span id="alphaFingerValue" style="font-weight: bold; color: #4ade80;">0.050</span>
+                                    </label>
+                                    <input type="number" id="alphaFingerInput" value="0.05" step="0.001" min="0.001" max="1" style="width: 80px;">
+                                    <span class="param-desc">Responsive tracking</span>
                                 </div>
-                            </div>
-                            
-                            <div style="margin-bottom: 10px;">
-                                <label for="alphaFingerInput">
-                                    Alpha (Finger Detected): 
-                                    <span id="alphaFingerValue" style="font-weight: bold; color: #4ade80;">0.010</span>
-                                </label>
-                                <input type="number" id="alphaFingerInput" value="0.01" step="0.001" min="0.001" max="1" style="width: 80px;">
-                                <span class="param-desc">Responsive tracking</span>
-                            </div>
-                            
-                            <div style="margin-bottom: 10px;">
-                                <label for="alphaNoFingerInput">
-                                    Alpha (No Finger): 
-                                    <span id="alphaNoFingerValue" style="font-weight: bold; color: #f87171;">0.001</span>
-                                </label>
-                                <input type="number" id="alphaNoFingerInput" value="0.001" step="0.0001" min="0.0001" max="1" style="width: 80px;">
-                                <span class="param-desc">Slow drift</span>
-                            </div>
-                            
-                            <div style="margin-top: 10px;">
-                                <label for="driftTargetInput">
-                                    Drift Target Speed: 
-                                    <span id="driftTargetValue" style="font-weight: bold;">0.70</span>x
-                                </label>
-                                <input type="number" id="driftTargetInput" value="0.7" step="0.05" min="0.1" max="2" style="width: 80px;">
-                                <span class="param-desc">Target when idle (positive only)</span>
-                            </div>
-                            
-                            <div style="margin-top: 10px;">
-                                <label for="amplitudeInput">
-                                    Gesture Amplitude: 
-                                    <span id="amplitudeValue" style="font-weight: bold;">1.00</span>
-                                </label>
-                                <input type="number" id="amplitudeInput" value="1.0" step="0.1" min="0.1" max="5" style="width: 80px;">
-                                <span class="param-desc">Gesture sensitivity (scales input)</span>
+
+                                <div style="margin-bottom: 10px;">
+                                    <label for="alphaNoFingerInput">
+                                        Alpha (No Finger):
+                                        <span id="alphaNoFingerValue" style="font-weight: bold; color: #f87171;">0.002</span>
+                                    </label>
+                                    <input type="number" id="alphaNoFingerInput" value="0.002" step="0.0001" min="0.0001" max="1" style="width: 80px;">
+                                    <span class="param-desc">Slow drift</span>
+                                </div>
+
+                                <div style="margin-top: 10px;">
+                                    <label for="driftTargetInput">
+                                        Drift Target Speed:
+                                        <span id="driftTargetValue" style="font-weight: bold;">0.70</span>x
+                                    </label>
+                                    <input type="number" id="driftTargetInput" value="0.7" step="0.05" min="0.1" max="2" style="width: 80px;">
+                                    <span class="param-desc">Target when idle (positive only)</span>
+                                </div>
+
+                                <div style="margin-top: 10px;">
+                                    <label for="amplitudeInput">
+                                        Gesture Amplitude:
+                                        <span id="amplitudeValue" style="font-weight: bold;">1.00</span>
+                                    </label>
+                                    <input type="number" id="amplitudeInput" value="1.0" step="0.1" min="0.1" max="5" style="width: 80px;">
+                                    <span class="param-desc">Gesture sensitivity (scales input)</span>
+                                </div>
                             </div>
                         </div>
                     </div>
 
-                    <div class="params-section">
-                        <h3>Navigation Parameters <span class="params-info">(updates with speed)</span></h3>
-                        <div class="param-grid">
-                            <div class="param-item">
-                                <label for="segmentDuration">Segment Duration (s)</label>
-                                <input type="number" id="segmentDuration" value="2.0" step="0.1" min="0.5" max="5">
-                                <span class="param-desc">Chunk duration</span>
+                    <!-- Transcription Section (below speed controls) -->
+                    <div class="transcription-section collapsible-section collapsed" style="margin-top: 20px;">
+                        <div class="collapsible-header" onclick="this.parentElement.classList.toggle('collapsed')">
+                            <h3>📝 Transcription & Smart Scrubbing</h3>
+                            <span class="collapsible-arrow">▼</span>
+                        </div>
+                        <div class="collapsible-content">
+                            <button id="transcribeBtn" class="btn" disabled style="padding: 10px 20px; font-size: 16px; cursor: pointer; background: #4ade80; border: none; border-radius: 8px; color: #000; font-weight: bold;">
+                                🎤 Transcribe Audio
+                            </button>
+
+                            <div id="transcriptionStatus" style="display: none; margin-top: 10px; font-style: italic; color: #ffd500;">
+                                <span id="transcriptionStatusText">Processing...</span>
                             </div>
-                            <div class="param-item">
-                                <label for="segmentStep">Segment Step (s)</label>
-                                <input type="number" id="segmentStep" value="1.5" step="0.1" min="0.1" max="4">
-                                <span class="param-desc">Distance between chunks</span>
+
+                            <div id="smartScrubControls" style="display: none; margin-top: 15px; padding: 15px; background: rgba(0,0,0,0.3); border-radius: 8px;">
+                                <h4 style="margin-top: 0;">Smart Scrubbing Settings</h4>
+
+                                <div style="margin-bottom: 10px;">
+                                    <label>
+                                        <input type="checkbox" id="smartScrubToggle">
+                                        <strong>Enable Smart Scrub</strong>
+                                        <span style="font-size: 0.9em; opacity: 0.8;">(Activates at speeds > 2.0x)</span>
+                                    </label>
+                                </div>
+
+                                <div style="margin-bottom: 10px;">
+                                    <label>
+                                        Semantic Threshold:
+                                        <input type="range" id="thresholdSlider" min="50" max="95" value="80" style="width: 150px;">
+                                        <span id="thresholdLabel">80th percentile</span>
+                                    </label>
+                                    <div style="font-size: 0.85em; opacity: 0.7; margin-top: 3px;">
+                                        Higher = fewer, more important words
+                                    </div>
+                                </div>
+
+                                <div style="margin-bottom: 10px;">
+                                    <label>
+                                        Word Interval:
+                                        <input type="range" id="intervalSlider" min="0" max="1000" step="50" value="0" style="width: 150px;">
+                                        <span id="intervalLabel">0ms</span>
+                                    </label>
+                                    <div style="font-size: 0.85em; opacity: 0.7; margin-top: 3px;">
+                                        Gap between words (0 = auto based on speed)
+                                    </div>
+                                </div>
+
+                                <div style="margin-bottom: 10px;">
+                                    <label>
+                                        Word Playback Speed:
+                                        <input type="range" id="wordSpeedSlider" min="0.5" max="2" step="0.1" value="1" style="width: 150px;">
+                                        <span id="wordSpeedLabel">1.0x</span>
+                                    </label>
+                                    <div style="font-size: 0.85em; opacity: 0.7; margin-top: 3px;">
+                                        Speed for individual word playback
+                                    </div>
+                                </div>
+
+                                <div style="margin-top: 10px; padding: 10px; background: rgba(255,215,0,0.1); border-radius: 5px;">
+                                    <div id="keywordDisplay" style="font-size: 1.3em; color: #ffd500; font-weight: bold; text-align: center;">
+                                        No keyword playing
+                                    </div>
+                                </div>
+
+                                <button id="pauseSmartScrubBtn" style="display: none; margin-top: 10px; padding: 8px 16px; background: #f87171; border: none; border-radius: 5px; cursor: pointer; color: #000; font-weight: bold;">
+                                    Pause Smart Scrub
+                                </button>
                             </div>
-                            <div class="param-item">
-                                <label for="segmentInterval">Segment Interval (ms)</label>
-                                <input type="number" id="segmentInterval" value="1200" step="50" min="100" max="3000">
-                                <span class="param-desc">Time between chunks</span>
-                            </div>
-                            <div class="param-item">
-                                <label for="fadeDuration">Fade Duration (s)</label>
-                                <input type="number" id="fadeDuration" value="0.25" step="0.05" min="0" max="1">
-                                <span class="param-desc">Crossfade time</span>
+                            <div id="transcriptionResult" style="display: none; margin-top: 15px; padding: 15px; background: rgba(0,0,0,0.3); border-radius: 8px; max-height: 400px; overflow-y: auto;">
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                                    <h4 style="margin: 0;">Transcript:</h4>
+                                    <button id="copyTranscriptBtn" style="padding: 5px 15px; background: #4ade80; border: none; border-radius: 5px; cursor: pointer; color: #000; font-weight: bold;">
+                                        📋 Copy
+                                    </button>
+                                </div>
+                                <div id="transcriptionText" style="line-height: 1.6; color: #fff;"></div>
                             </div>
                         </div>
-                        <div class="param-info-box">
-                            <strong>Effective Values (at current speed):</strong>
-                            <div class="effective-params">
-                                <span>Step: <strong id="effectiveStep">1.5</strong>s</span>
-                                <span>Interval: <strong id="effectiveInterval">1200</strong>ms</span>
+                    </div>
+
+                    <div class="params-section collapsible-section collapsed">
+                        <div class="collapsible-header" onclick="this.parentElement.classList.toggle('collapsed')">
+                            <h3>Navigation Parameters</h3>
+                            <span class="collapsible-arrow">▼</span>
+                        </div>
+                        <div class="collapsible-content">
+                            <div class="param-grid">
+                                <div class="param-item">
+                                    <label for="segmentDuration">Segment Duration (s)</label>
+                                    <input type="number" id="segmentDuration" value="2.0" step="0.1" min="0.5" max="5">
+                                    <span class="param-desc">Chunk duration</span>
+                                </div>
+                                <div class="param-item">
+                                    <label for="segmentStep">Segment Step (s)</label>
+                                    <input type="number" id="segmentStep" value="1.5" step="0.1" min="0.1" max="4">
+                                    <span class="param-desc">Distance between chunks</span>
+                                </div>
+                                <div class="param-item">
+                                    <label for="segmentInterval">Segment Interval (ms)</label>
+                                    <input type="number" id="segmentInterval" value="1200" step="50" min="100" max="3000">
+                                    <span class="param-desc">Time between chunks</span>
+                                </div>
+                                <div class="param-item">
+                                    <label for="fadeDuration">Fade Duration (s)</label>
+                                    <input type="number" id="fadeDuration" value="0.25" step="0.05" min="0" max="1">
+                                    <span class="param-desc">Crossfade time</span>
+                                </div>
+                            </div>
+                            <div class="param-info-box">
+                                <strong>Effective Values (at current speed):</strong>
+                                <div class="effective-params">
+                                    <span>Step: <strong id="effectiveStep">1.5</strong>s</span>
+                                    <span>Interval: <strong id="effectiveInterval">1200</strong>ms</span>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -438,17 +529,22 @@
                         <button id="resetBtn">Reset</button>
                     </div>
 
-                    <div class="how-it-works-section">
-                        <h3>📊 How it works:</h3>
-                        <p>• <strong>Input Speed:</strong> Controlled by hand gestures (raw input)</p>
-                        <p>• <strong>Playback Speed:</strong> Smoothed speed (what you hear)</p>
-                        <p>• <strong>Formula:</strong> s = s - α(s - A·g) where A is amplitude</p>
-                        <p>• <strong>Alpha (Finger):</strong> Fast response when hand detected</p>
-                        <p>• <strong>Alpha (No Finger):</strong> Slow drift towards target</p>
-                        <p>• <strong>Amplitude:</strong> Scales gesture sensitivity (higher = more sensitive)</p>
-                        <p>• <strong>Forward (positive):</strong> Normal playback with tempo control</p>
-                        <p>• <strong>Backward (negative):</strong> Chunk-based navigation</p>
-                        <p>• Speed adjustments preserve pitch in both directions</p>
+                    <div class="how-it-works-section collapsible-section collapsed">
+                        <div class="collapsible-header" onclick="this.parentElement.classList.toggle('collapsed')">
+                            <h3>📊 How it works</h3>
+                            <span class="collapsible-arrow">▼</span>
+                        </div>
+                        <div class="collapsible-content">
+                            <p>• <strong>Input Speed:</strong> Controlled by hand gestures (raw input)</p>
+                            <p>• <strong>Playback Speed:</strong> Smoothed speed (what you hear)</p>
+                            <p>• <strong>Formula:</strong> s = s - α(s - A·g) where A is amplitude</p>
+                            <p>• <strong>Alpha (Finger):</strong> Fast response when hand detected</p>
+                            <p>• <strong>Alpha (No Finger):</strong> Slow drift towards target</p>
+                            <p>• <strong>Amplitude:</strong> Scales gesture sensitivity (higher = more sensitive)</p>
+                            <p>• <strong>Forward (positive):</strong> Normal playback with tempo control</p>
+                            <p>• <strong>Backward (negative):</strong> Chunk-based navigation</p>
+                            <p>• Speed adjustments preserve pitch in both directions</p>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -483,15 +579,45 @@
             </div>
             
             <div class="settings-section">
-                <div class="upload-section" id="modalUploadSection">
-                    <input type="file" id="audioFile" accept="audio/*">
-                    <button id="loadDefaultBtn" class="load-default-btn">Load Default Audio</button>
-                </div>
-                
-                <div id="currentAudioInfo" style="display: none; margin-top: 20px; padding: 15px; background: rgba(74, 222, 128, 0.2); border-radius: 10px; border: 2px solid #4ade80;">
+                <!-- Current audio info (shown after loading) -->
+                <div id="currentAudioInfo" style="display: none; margin-bottom: 20px; padding: 15px; background: rgba(74, 222, 128, 0.2); border-radius: 10px; border: 2px solid #4ade80;">
                     <h3 style="margin: 0 0 10px 0; color: #4ade80;">✓ Audio Loaded</h3>
                     <p style="margin: 5px 0; opacity: 0.9;" id="audioFileName">File: example.mp3</p>
                     <p style="margin: 5px 0; opacity: 0.9;" id="audioDuration">Duration: 0:00</p>
+                    <button id="changeAudioBtn" class="load-default-btn" style="margin-top: 10px; width: 100%;">
+                        Load Different Audio
+                    </button>
+                </div>
+                
+                <!-- Upload section (hidden after loading) -->
+                <div id="modalUploadSection">
+                    <!-- File Upload -->
+                    <div style="margin-bottom: 20px;">
+                        <h4 style="margin: 0 0 10px 0; color: #ffd700;">📂 Upload from File</h4>
+                        <input type="file" id="audioFile" accept="audio/*">
+                    </div>
+                    
+                    <!-- YouTube Upload (moved from main view) -->
+                    <div style="margin-bottom: 20px;">
+                        <h4 style="margin: 0 0 10px 0; color: #ffd700;">🎬 Load from YouTube</h4>
+                        <input
+                            type="url"
+                            id="youtubeUrlInput"
+                            placeholder="Paste YouTube link"
+                            style="padding: 10px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.3); background: rgba(255, 255, 255, 0.1); color: white; width: 100%; margin-bottom: 10px;"
+                        >
+                        <button id="loadYouTubeBtn" class="load-default-btn" style="width: 100%;">
+                            Load from YouTube
+                        </button>
+                    </div>
+                    
+                    <!-- Default Audio -->
+                    <div>
+                        <h4 style="margin: 0 0 10px 0; color: #ffd700;">📝 Default Audio</h4>
+                        <button id="loadDefaultBtn" class="load-default-btn" style="width: 100%;">
+                            Load Default Audio
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -505,7 +631,11 @@
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation/selfie_segmentation.js" crossorigin="anonymous"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/howler/2.2.4/howler.min.js"></script>
 
+    <!-- Optional: set API_BASE_URL to use an external backend for YouTube (e.g. Railway/Render). Uncomment and set your URL. -->
+    <!-- <script>window.API_BASE_URL = 'https://your-backend.railway.app';</script> -->
+
     <script src="touchControl.js"></script>
     <script src="script.js"></script>
+    <script type="module" src="faceRecognition.js"></script>
 </body>
 </html>
